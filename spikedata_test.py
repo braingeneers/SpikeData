@@ -539,12 +539,6 @@ class SpikeDataTest(unittest.TestCase):
         self.assertAll(sd.resampled_isi(0).round(2) == np.arange(1, 100))
         self.assertAll(sd.resampled_isi(10).round(2) == 0.1)
 
-    def test_isi_methods(self):
-        # Try creating an ISI histogram to make sure it works. If all
-        # spikes are accounted for, the 100 spikes turn into 99 ISIs.
-        sd = SpikeData([1e3 * np.random.rand(100000)], length=1e3)
-        self.assertAlmostEqual(sd.isi_skewness()[0], 2, 1)
-
     def test_latencies(self):
         a = SpikeData([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]])
         b = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) - 0.2

@@ -132,6 +132,7 @@ class SpikeData:
         if not neuron_attributes:
             neuron_attributes = [NestIDNeuronAttributes(i) for i in cells]
         else:
+            # TODO test adding to existing attributes
             for i, attrs in enumerate(neuron_attributes):
                 attrs.nest_id = cells[i]
         print(neuron_attributes)
@@ -182,6 +183,7 @@ class SpikeData:
         Filtering is done by butter_filter() with parameters given
         by the `filter` argument. Set `filter` to None to disable.
         """
+        # TODO test generating spikes from thresholding
         if filter:
             data = butter_filter(data, fs=fs_Hz, **filter)
 
@@ -418,7 +420,7 @@ class SpikeData:
         but if an iterable is provided, it is taken as a list of neuron
         indices to select as with self.subset().
         """
-        if isinstance(key, slice):
+        if isinstance(key, slice):  # TODO test both kinds of square bracket indexing
             return self.subtime(key.start, key.stop)
         else:
             return self.subset(key)
@@ -429,7 +431,7 @@ class SpikeData:
 
         :param: spikeData: spikeData object to append to the current object
         """
-        if self.N != spikeData.N:
+        if self.N != spikeData.N: # TODO test appending
             raise ValueError("Cannot concatenate SpikeData with different N")
         train = [
             np.hstack([tr1, tr2 + self.length + offset])
@@ -479,6 +481,7 @@ class SpikeData:
 
     def isi_skewness(self):
         "Skewness of interspike interval distribution."
+        # TODO generate better synthetic data to test this
         intervals = self.interspike_intervals()
         return [stats.skew(intl) for intl in intervals]
 
@@ -487,6 +490,7 @@ class SpikeData:
         Logarithmic (log base 10) interspike interval histogram.
         Return histogram and bins in log10 scale.
         """
+        # TODO missing tests
         intervals = self.interspike_intervals()
         ret = []
         ret_logbins = []
@@ -506,6 +510,7 @@ class SpikeData:
         threshold.
         [1] Kapucu, et al. Frontiers in computational neuroscience 6 (2012): 38
         """
+        # TODO missing tests
         isi_thr = []
         for n in range(len(hist)):
             h = hist[n]
@@ -547,6 +552,7 @@ class SpikeData:
         Modify `self` to include all the spikes from `sd` that occur before the end of
         `self`.
         """
+        #  TODO missing tests
         if sd.length != self.length:
             sd = sd.subtime(0, self.length)
         self.train += sd.train
@@ -662,6 +668,7 @@ class SpikeData:
         :return: 2d list, each row is a list of latencies
                         from a time to each spike in the train
         """
+        # TODO test not crashing on special cases
         latencies = []
         if len(times) == 0:
             return latencies
@@ -693,6 +700,7 @@ class SpikeData:
         :param window_ms: window in ms
         :return: 2d list, each row is a list of latencies per neuron
         """
+        # TODO missing tests
         return self.latencies(self.train[i], window_ms)
 
     def randomized(self, bin_size_ms=1.0, seed=None):
@@ -702,6 +710,7 @@ class SpikeData:
         SpikeData by randomly reallocating all spike times to different
         neurons at a resolution given by dt.
         """
+        # TODO missing tests
         return SpikeData.from_raster(
             randomize_raster(self.sparse_raster(bin_size_ms), seed=seed),
             bin_size_ms,
@@ -714,6 +723,7 @@ class SpikeData:
         """
         Population firing rate of all units in the SpikeData object.
         """
+        # TODO missing tests
         bins, pop_rate = population_firing_rate(
             self.train, self.length, bin_size, w, average
         )
@@ -733,6 +743,7 @@ def population_firing_rate(trains, rec_length=None, bin_size=10, w=5, average=Fa
     :return: An array of the bins and an array of the frequency
              for the given units' spiking activity
     """
+    # TODO missing tests
     if isinstance(trains, (list, np.ndarray)) and not isinstance(
         trains[0], (list, np.ndarray)
     ):
@@ -1014,6 +1025,7 @@ def pearson(spikes):
 
 def cumulative_moving_average(hist):
     "The cumulative moving average for a histogram. Return a list of CMA."
+    # TODO missing tests
     ret = []
     for h in hist:
         cma = 0
@@ -1034,6 +1046,7 @@ def burst_detection(spike_times, burst_threshold, spike_num_thr=3):
           [index of burst start point, number of spikes in this burst]
         burst_set -- a list of spike times of all the bursts.
     """
+    # TODO missing tests
     spike_num_burst = 1
     spike_num_list = []
     for i in range(len(spike_times) - 1):
@@ -1068,7 +1081,7 @@ def butter_filter(data, lowcut=None, highcut=None, fs=20000.0, order=5):
     Return:
         The filtered output with the same shape as data
     """
-
+    # TODO missing tests - some will be covered by SpikeData.from_thresholding()
     assert (lowcut not in [None, 0]) or (
         highcut != None
     ), "Need at least a low cutoff (lowcut) or high cutoff (highcut) frequency!"
