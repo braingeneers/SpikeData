@@ -1,5 +1,6 @@
 import unittest
 from collections import namedtuple
+from dataclasses import dataclass
 
 import numpy as np
 from scipy import sparse, stats
@@ -11,17 +12,14 @@ from spikedata import (SpikeData, best_effort_sample, fano_factors, pearson,
 Neuron = namedtuple("Neuron", "spike_time fs")
 
 
-class DerpSpikeRecorder:
-    "Weird mockup of a NEST spike recorder."
-
+class MockSpikeRecorder:
     def __init__(self, idces, times):
         self.events = dict(senders=idces, times=times)
 
-    def __getattr__(self, attr):
-        return self.events[attr]
 
-    def __iter__(self):
-        yield self
+@dataclass
+class MockNeuronAttributes:
+    size: float
 
 
 def sd_from_counts(counts):
@@ -109,13 +107,20 @@ class SpikeDataTest(unittest.TestCase):
 
         # Test 'NEST SpikeRecorder' constructor, passing in an arange to
         # take the place of the NodeCollection you would usually use.
-        recorder = DerpSpikeRecorder(idces + 1, times)
+        recorder = MockSpikeRecorder(idces + 1, times)
         sd6 = SpikeData.from_nest(recorder, 1 + np.arange(5))
         self.assertSpikeDataEqual(sd, sd6)
 
-        # Make sure the NEST constructor can combine ranges.
-        sd7 = SpikeData.from_nest(recorder, 1 + np.arange(3), 4 + np.arange(2))
+        # Make sure the NEST constructor can combine ranges, and adds nest_id to
+        # existing neuron attributes without affecting the values already there.
+        attrs = [MockNeuronAttributes(ξ) for ξ in np.random.rand(5)]
+        sd7 = SpikeData.from_nest(
+            recorder, 1 + np.arange(3), 4 + np.arange(2), neuron_attributes=attrs
+        )
         self.assertSpikeDataEqual(sd, sd7)
+        for i, (attr, neuron_attrs) in enumerate(zip(attrs, sd7.neuron_attributes)):
+            self.assertEqual(attr.size, neuron_attrs.size)
+            self.assertEqual(neuron_attrs.nest_id, i + 1)
 
         # Test the raster constructor. We can't expect equality because of
         # finite bin size, but we can check equality for the rasters.
@@ -471,7 +476,7 @@ class SpikeDataTest(unittest.TestCase):
             N=5,
             length=1000,
             metadata=dict(name="Marvin"),
-            neuron_attributes=[{"size": ξ} for ξ in np.random.rand(5)],
+            neuron_attributes=[MockNeuronAttributes(ξ) for ξ in np.random.rand(5)],
         )
 
         # Make sure subset propagates all metadata and correctly
@@ -480,7 +485,7 @@ class SpikeDataTest(unittest.TestCase):
         truth = [foo.neuron_attributes[i] for i in subset]
         bar = foo.subset(subset)
         self.assertDictEqual(foo.metadata, bar.metadata)
-        self.assertListOfDictsEqual(truth, bar.neuron_attributes)
+        self.assertNeuronAttributesEqual(truth, bar.neuron_attributes)
 
         # Change the metadata of foo and see that it's copied, so the
         # change doesn't propagate.
@@ -489,11 +494,12 @@ class SpikeDataTest(unittest.TestCase):
         self.assertDictEqual(bar.metadata, baz.metadata)
         self.assertIsNot(bar.metadata, baz.metadata)
         self.assertNotEqual(foo.metadata["name"], bar.metadata["name"])
-        self.assertListOfDictsEqual(bar.neuron_attributes, baz.neuron_attributes)
+        self.assertNeuronAttributesEqual(bar.neuron_attributes, baz.neuron_attributes)
 
-    def assertListOfDictsEqual(self, nda, ndb, msg=None):
+    def assertNeuronAttributesEqual(self, nda, ndb, msg=None):
+        self.assertEqual(len(nda), len(ndb))
         for n, m in zip(nda, ndb):
-            self.assertDictEqual(n, m)
+            self.assertEqual(n, m)
 
     def test_raw_data(self):
         # Make sure there's an error if only one of raw_data and

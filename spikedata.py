@@ -132,7 +132,6 @@ class SpikeData:
         if not neuron_attributes:
             neuron_attributes = [NestIDNeuronAttributes(i) for i in cells]
         else:
-            # TODO test adding to existing attributes
             for i, attrs in enumerate(neuron_attributes):
                 attrs.nest_id = cells[i]
         print(neuron_attributes)
