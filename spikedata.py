@@ -105,30 +105,24 @@ class SpikeData:
         return SpikeData.from_idces_times(idces, times_ms, N, **kwargs)
 
     @staticmethod
-    def from_nest(spike_recorder, nodes, neuron_attributes=None, **kwargs):
+    def from_nest(spike_recorder, *nodeses, neuron_attributes=None, **kwargs):
         """
-        Create a SpikeData object from a NEST spike recorder. The second
-        argument can be either an integer number of nodes, or a
-        NodeCollection (or other iterable of integers) indicating which
-        units to include.
+        Create a SpikeData object from a NEST spike recorder. The remaining positional
+        arguments should each be an iterable of integers (such as a nest.NodeCollection)
+        indicating which units to include.
 
-        All metadata parameters of the regular constructor are accepted.
+        Automatically includes a field `nest_id` in the neuron attributes. All other
+        metadata parameters of the regular constructor are also accepted.
         """
-        # These are indices and times, but since nodes may (and in many
-        # cases *must*) subset the indices, we can't just use the
-        # idces+times constructor.
+        # These are indices and times, but since nodes usually subset the indices, we
+        # can't just use the idces+times constructor.
         idces = spike_recorder.events["senders"]
         times = spike_recorder.events["times"]
-        try:
-            maxcell = nodes
-            cells = np.arange(maxcell) + 1
-        except (TypeError, ValueError):
-            cells = np.array(nodes)
-            maxcell = cells.max()
+        cells = np.hstack(nodeses)
+        maxcell = cells.max()
         cellrev = np.zeros(maxcell + 1, int)
         cellrev[cells] = np.arange(len(cells))
 
-        # TODO accept multiple nodeses
         cellset = set(cells)
         train = [[] for _ in cells]
         for i, t in zip(idces, times):
@@ -136,10 +130,10 @@ class SpikeData:
                 train[cellrev[i]].append(t)
 
         if not neuron_attributes:
-            neuron_attributes = [NestIDNeuronAttributes(i) for i in nodes]
+            neuron_attributes = [NestIDNeuronAttributes(i) for i in cells]
         else:
             for i, attrs in enumerate(neuron_attributes):
-                attrs.nest_id = nodes[i]
+                attrs.nest_id = cells[i]
         print(neuron_attributes)
         return SpikeData(train, neuron_attributes=neuron_attributes, **kwargs)
 

@@ -113,6 +113,10 @@ class SpikeDataTest(unittest.TestCase):
         sd6 = SpikeData.from_nest(recorder, 1 + np.arange(5))
         self.assertSpikeDataEqual(sd, sd6)
 
+        # Make sure the NEST constructor can combine ranges.
+        sd7 = SpikeData.from_nest(recorder, 1 + np.arange(3), 4 + np.arange(2))
+        self.assertSpikeDataEqual(sd, sd7)
+
         # Test the raster constructor. We can't expect equality because of
         # finite bin size, but we can check equality for the rasters.
         bin_size = 1.0
