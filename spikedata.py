@@ -95,14 +95,14 @@ class SpikeData:
         All metadata parameters of the regular constructor are accepted.
         """
         N, T = raster.shape
-        if raster.max() > 1:
-            logger.warning("raster has multiple spikes per bin; some will be lost")
-        idces, times = raster.nonzero()
-        # Put all spikes in the middle of the bin to make it clear which bin
-        # the spikes belong to.
-        times_ms = times * bin_size_ms + bin_size_ms / 2
+        train = [[] for _ in range(N)]
+        for i, t in zip(*raster.nonzero()):
+            n_spikes = raster[i, t]
+            times = t*bin_size_ms + np.linspace(0, bin_size_ms, n_spikes + 2)[1:-1]
+            train[i].extend(times)
+
         kwargs.setdefault("length", T * bin_size_ms)
-        return SpikeData.from_idces_times(idces, times_ms, N, **kwargs)
+        return SpikeData(train, **kwargs)
 
     @staticmethod
     def from_nest(spike_recorder, *nodeses, neuron_attributes=None, **kwargs):

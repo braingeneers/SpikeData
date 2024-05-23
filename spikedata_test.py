@@ -129,6 +129,11 @@ class SpikeDataTest(unittest.TestCase):
         r2 = SpikeData.from_raster(r, bin_size).raster(bin_size)
         self.assertAll(r == r2)
 
+        # Make sure the raster constructor handles multiple spikes in the same bin.
+        tinysd = SpikeData.from_raster(np.array([[0, 3, 0]]), 20)
+        print(tinysd.train)
+        self.assertAll(tinysd.train[0] == [25., 30., 35.])
+
         # Test subset() constructor.
         idces = [1, 2, 3]
         sdsub = sd.subset(idces)
