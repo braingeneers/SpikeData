@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from logging import getLogger
 
 import numpy as np
-import powerlaw
 from scipy import ndimage, signal, sparse, stats
 
 __all__ = [
@@ -33,6 +32,7 @@ class NestIDNeuronAttributes:
     """
     Neuron attributes containing nothing but the NEST ID of each unit from a simulation.
     """
+
     nest_id: int
 
 
@@ -98,7 +98,7 @@ class SpikeData:
         train = [[] for _ in range(N)]
         for i, t in zip(*raster.nonzero()):
             n_spikes = raster[i, t]
-            times = t*bin_size_ms + np.linspace(0, bin_size_ms, n_spikes + 2)[1:-1]
+            times = t * bin_size_ms + np.linspace(0, bin_size_ms, n_spikes + 2)[1:-1]
             train[i].extend(times)
 
         kwargs.setdefault("length", T * bin_size_ms)
@@ -434,7 +434,7 @@ class SpikeData:
 
         :param: spikeData: spikeData object to append to the current object
         """
-        if self.N != spikeData.N: # TODO test appending
+        if self.N != spikeData.N:  # TODO test appending
             raise ValueError("Cannot concatenate SpikeData with different N")
         train = [
             np.hstack([tr1, tr2 + self.length + offset])
@@ -887,10 +887,15 @@ def _p_and_alpha(data, N_surrogate=1000, pval_truncated=0.0):
     # Perform the fits and compare the distributions with IO
     # silenced because there's no option to disable printing
     # in this library...
+    try:
+        from powerlaw import Fit
+    except ImportError:
+        raise ImportError("The powerlaw library is required to compute DCC.")
+
     with open(os.devnull, "w") as f, contextlib.redirect_stdout(
         f
     ), contextlib.redirect_stderr(f):
-        fit = powerlaw.Fit(data)
+        fit = Fit(data)
         stat, p = fit.distribution_compare(
             "power_law", "truncated_power_law", nested=True
         )

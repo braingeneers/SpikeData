@@ -6,8 +6,13 @@ import numpy as np
 from scipy import sparse, stats
 
 import spikedata
-from spikedata import (SpikeData, best_effort_sample, fano_factors, pearson,
-                       randomize_raster)
+from spikedata import (
+    SpikeData,
+    best_effort_sample,
+    fano_factors,
+    pearson,
+    randomize_raster,
+)
 
 Neuron = namedtuple("Neuron", "spike_time fs")
 
@@ -132,7 +137,7 @@ class SpikeDataTest(unittest.TestCase):
         # Make sure the raster constructor handles multiple spikes in the same bin.
         tinysd = SpikeData.from_raster(np.array([[0, 3, 0]]), 20)
         print(tinysd.train)
-        self.assertAll(tinysd.train[0] == [25., 30., 35.])
+        self.assertAll(tinysd.train[0] == [25.0, 30.0, 35.0])
 
         # Test subset() constructor.
         idces = [1, 2, 3]
