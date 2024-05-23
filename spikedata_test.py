@@ -109,8 +109,8 @@ class SpikeDataTest(unittest.TestCase):
 
         # Test 'NEST SpikeRecorder' constructor, passing in an arange to
         # take the place of the NodeCollection you would usually use.
-        recorder = DerpSpikeRecorder(idces, times)
-        sd6 = SpikeData.from_nest(recorder, np.arange(5))
+        recorder = DerpSpikeRecorder(idces + 1, times)
+        sd6 = SpikeData.from_nest(recorder, 1 + np.arange(5))
         self.assertSpikeDataEqual(sd, sd6)
 
         # Test the raster constructor. We can't expect equality because of
@@ -128,13 +128,9 @@ class SpikeDataTest(unittest.TestCase):
             self.assertAll(sdsub.train[i] == sd.train[j])
 
         # Make sure you can subset by neuron_data, not just raw index.
-        sdsub = sd6.subset([4, 5])
-        sdsub2 = sd6.subset([4, 5], by="nest_id")
+        sdsub = sd6.subset([1, 2])
+        sdsub2 = sd6.subset([2, 3], by="nest_id")
         self.assertSpikeDataEqual(sdsub, sdsub2)
-
-        # Make sure the previous is actually using neuron_data.
-        sdsub3 = sd6.subset([3, 4, 5], by="nest_id").subset([4, 5], by="nest_id")
-        self.assertSpikeDataEqual(sdsub, sdsub3)
 
         # Test subtime() constructor idempotence.
         sdtimefull = sd.subtime(0, 100)

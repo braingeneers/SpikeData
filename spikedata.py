@@ -3,6 +3,7 @@ import heapq
 import itertools
 import os
 from collections import namedtuple
+from dataclasses import dataclass
 from logging import getLogger
 
 import numpy as np
@@ -25,6 +26,14 @@ __all__ = [
 DCCResult = namedtuple("DCCResult", "dcc p_size p_duration")
 
 logger = getLogger("spikedata")
+
+
+@dataclass
+class NestIDNeuronAttributes:
+    """
+    Neuron attributes containing nothing but the NEST ID of each unit from a simulation.
+    """
+    nest_id: int
 
 
 class SpikeData:
@@ -96,7 +105,7 @@ class SpikeData:
         return SpikeData.from_idces_times(idces, times_ms, N, **kwargs)
 
     @staticmethod
-    def from_nest(spike_recorder, nodes, **kwargs):
+    def from_nest(spike_recorder, nodes, neuron_attributes=None, **kwargs):
         """
         Create a SpikeData object from a NEST spike recorder. The second
         argument can be either an integer number of nodes, or a
@@ -126,8 +135,13 @@ class SpikeData:
             if i in cellset:
                 train[cellrev[i]].append(t)
 
-        # TODO add NEST IDs to neuron_attributes
-        return SpikeData(train, **kwargs)
+        if not neuron_attributes:
+            neuron_attributes = [NestIDNeuronAttributes(i) for i in nodes]
+        else:
+            for i, attrs in enumerate(neuron_attributes):
+                attrs.nest_id = nodes[i]
+        print(neuron_attributes)
+        return SpikeData(train, neuron_attributes=neuron_attributes, **kwargs)
 
     @staticmethod
     def from_events(events, N=None, **kwargs):
@@ -256,7 +270,7 @@ class SpikeData:
         self.neuron_attributes = None
         if neuron_attributes:
             self.neuron_attributes = neuron_attributes.copy()
-            if len(neuron_attributes) != N:
+            if len(neuron_attributes) != self.N:
                 raise ValueError(
                     f"neuron_attributes has {len(neuron_attributes)} "
                     f"instead of {self.N} items."
@@ -336,8 +350,14 @@ class SpikeData:
         the same way as the spike trains.
         """
         if by is not None:
-            # TODO
-            raise NotImplementedError()
+            if self.neuron_attributes is None:
+                raise ValueError("Cannot subset by neuron_attributes: none defined.")
+            _missing = object()
+            units = [
+                i
+                for i in range(self.N)
+                if getattr(self.neuron_attributes[i], by, _missing) in units
+            ]
 
         train = [ts for i, ts in enumerate(self.train) if i in units]
 
