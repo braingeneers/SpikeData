@@ -2,6 +2,7 @@ import contextlib
 import heapq
 import itertools
 import os
+import warnings
 from collections import namedtuple
 from dataclasses import dataclass
 from logging import getLogger
@@ -76,9 +77,8 @@ class SpikeData:
     @staticmethod
     def from_idces_times(idces, times, N=None, **kwargs):
         """
-        Create a SpikeData object with N total units based on lists of unit
-        indices and spike times. If N is not provided, it is set to the
-        maximum index in idces + 1.
+        Create a SpikeData object with N total units based on lists of unit indices and
+        spike times. If N is not provided, it is set to one more than the maximum index.
 
         All metadata parameters of the regular constructor are accepted.
         """
@@ -87,10 +87,12 @@ class SpikeData:
     @staticmethod
     def from_raster(raster, bin_size_ms, **kwargs):
         """
-        Create a SpikeData object based on a spike raster matrix with shape
-        (N, T), where T is a number of time bins. Note that spike aliasing
-        will occur if the raster has any entries greater than 1, rather than
-        allowing multiple spikes to occur at exactly the same time.
+        Create a SpikeData object based on a spike raster matrix with shape (N, T),
+        where T is a number of time bins.
+
+        To make it clear which bin each spike belongs to, the generated spike times are
+        evenly spaced within each bin. For example, if a unit fires 3 times in a 10 ms
+        bin, those events go at 2.5, 5, and 7.5 ms after the start of the bin.
 
         All metadata parameters of the regular constructor are accepted.
         """
@@ -111,8 +113,10 @@ class SpikeData:
         arguments should each be an iterable of integers (such as a nest.NodeCollection)
         indicating which units to include.
 
-        Automatically includes a field `nest_id` in the neuron attributes. All other
-        metadata parameters of the regular constructor are also accepted.
+        If neuron_attributes is provided, each item will be mutated to add a field
+        `nest_id`. Otherwise, a new list of neuron attributes objects will be created,
+        each containing only the NEST ID of the corresponding unit. All other metadata
+        parameters of the regular constructor are also accepted.
         """
         # These are indices and times, but since nodes usually subset the indices, we
         # can't just use the idces+times constructor.
@@ -142,7 +146,7 @@ class SpikeData:
         """
         Create a SpikeData object with N total units based on a list of
         events, each an (index, time) pair. If N is not provided, it is
-        set to the maximum index + 1.
+        set to one more than the maximum index.
 
         All metadata parameters of the regular constructor are accepted.
         """
@@ -170,20 +174,23 @@ class SpikeData:
         data,
         fs_Hz=20e3,
         threshold_sigma=5.0,
-        filter=dict(lowcut=300.0, highcut=6e3, order=3),
+        filter=True,
         hysteresis=True,
         direction="both",
     ):
         """
-        Create a SpikeData object from raw data by filtering and
-        thresholding raw electrophysiological data formatted as an array
-        with shape (channels, time).
+        Create a SpikeData object from raw data by filtering and thresholding raw
+        electrophysiological data formatted as an array with shape (channels, time).
 
-        Filtering is done by butter_filter() with parameters given
-        by the `filter` argument. Set `filter` to None to disable.
+        If filter is True (default), filter the data using a third-order Butterworth
+        filter with passband 300 Hz to 6 kHz. To use different filter parameters, pass a
+        dictionary, which will be passed as keyword arguments to butter_filter(). If
+        filter is falsy, no filtering is done.
         """
         # TODO test generating spikes from thresholding
         if filter:
+            if filter is True:
+                filter = dict(lowcut=300.0, highcut=6e3, order=3)
             data = butter_filter(data, fs=fs_Hz, **filter)
 
         threshold = threshold_sigma * np.std(data, axis=1, keepdims=True)
@@ -286,9 +293,11 @@ class SpikeData:
 
     def idces_times(self):
         """
-        Return separate lists of times and indices, e.g. for raster
-        plots. This is not a property unlike `times` and `events`
-        because the lists must actually be constructed in memory.
+        Generate a matched pair of numpy arrays containing unit indices and times for
+        all events.
+
+        This is not a property unlike `times` and `events` because the lists must
+        actually be constructed in memory.
         """
         idces, times = [], []
         for i, t in self.events:
@@ -298,29 +307,41 @@ class SpikeData:
 
     def frames(self, length, overlap=0):
         """
-        Iterate new SpikeData objects corresponding to subwindows of
-        a given `length` with a fixed `overlap`.
+        Iterate new SpikeData objects corresponding to subwindows of a given `length`
+        with a fixed `overlap`.
         """
         for start in np.arange(0, self.length, length - overlap):
             yield self.subtime(start, start + length)
 
     def binned(self, bin_size=40):
         """
-        Quantizes time into intervals of bin_size and counts the
-        number of events in each bin, considered as a lower half-open
-        interval of times, with the exception that events at time
-        precisely zero will be included in the first bin.
+        Quantize time into intervals of bin_size and counts the number of events in
+        each bin, considered as a lower half-open interval of times, with the exception
+        that events at time precisely zero will be included in the first bin.
         """
         return self.sparse_raster(bin_size).sum(0)
 
+    def binned_meanrate(self, bin_size=40, unit="kHz"):
+        """
+        Calculate the mean firing rate across the population in each time bin.
+
+        The rate is calculated as the number of events in each bin divided by the bin
+        size and number of units. The unit may be either `Hz` or `kHz` (default).
+        """
+        binned_rate = self.binned(bin_size) / self.N / bin_size
+        if unit == "Hz":
+            return 1e3 * binned_rate
+        elif unit == "kHz":
+            return binned_rate
+        else:
+            raise ValueError(f"Unknown unit {unit} (try Hz or kHz)")
+
     def rates(self, unit="kHz"):
         """
-        Calculate the firing rate of each neuron as an average number
-        of events per time over the duration of the data. The unit may
-        be either `Hz` or `kHz` (default).
+        Calculate the mean firing rate of each neuron as an average number of events per
+        time over the length of the data. The unit may be `Hz` or `kHz` (default).
         """
         rates = np.array([len(t) for t in self.train]) / self.length
-
         if unit == "Hz":
             return 1e3 * rates
         elif unit == "kHz":
@@ -330,9 +351,8 @@ class SpikeData:
 
     def resampled_isi(self, times, sigma_ms=10.0):
         """
-        Calculate firing rate at the given times by interpolating the
-        inverse ISI, considered valid in between any two spikes. If any
-        neuron has only one spike, the rate is assumed to be zero.
+        Calculate firing rate of each unit at the given times by calculating the
+        interspike intervals and interpolating their inverse.
         """
         return np.array([_resampled_isi(t, times, sigma_ms) for t in self.train])
 
@@ -376,16 +396,14 @@ class SpikeData:
 
     def subtime(self, start, end):
         """
-        Return a new SpikeData with only spikes in a time range,
-        closed on top but open on the bottom unless the lower bound is
-        zero, consistent with the binning methods. This is to ensure
-        no overlap between adjacent slices.
-        Start and end can be negative, in which case they are counted
-        backwards from the end. They can also be None or Ellipsis,
-        which results in only paying attention to the other bound.
-        All metadata and neuron data are propagated, while raw data is
-        sliced to the same range of times, but overlap is okay, so we
-        include all samples within the closed interval.
+        Return a new SpikeData with only spikes in a time range, closed on top but open
+        on the bottom unless the lower bound is zero, consistent with the binning
+        methods. This is to ensure no overlap between adjacent slices.
+
+        Start and end can be negative, in which case they are counted backwards from the
+        end. They can also be None or Ellipsis, in which case that end of the data is
+        not truncated. All metadata and neuron data are propagated, while raw data is
+        sliced to the same range of times, including all samples in the closed interval.
         """
         if start is None or start is Ellipsis:
             start = 0
@@ -419,9 +437,9 @@ class SpikeData:
 
     def __getitem__(self, key):
         """
-        If a slice is provided, it is taken in time as with self.subtime(),
-        but if an iterable is provided, it is taken as a list of neuron
-        indices to select as with self.subset().
+        If a slice is provided, it is taken in time as with self.subtime(), but if an
+        iterable is provided, it is taken as a list of neuron indices to select using
+        self.subset().
         """
         if isinstance(key, slice):  # TODO test both kinds of square bracket indexing
             return self.subtime(key.start, key.stop)
@@ -429,10 +447,11 @@ class SpikeData:
             return self.subset(key)
 
     def append(self, spikeData, offset=0):
-        """Appends a spikeData object to the current object. These must have
-        the same number of neurons.
+        """
+        Append the spike times from another SpikeData object to this one, optionally
+        offsetting them by a given amount from the end of the current data.
 
-        :param: spikeData: spikeData object to append to the current object
+        The two SpikeData objects must have the same number of neurons.
         """
         if self.N != spikeData.N:  # TODO test appending
             raise ValueError("Cannot concatenate SpikeData with different N")
@@ -455,10 +474,11 @@ class SpikeData:
 
     def sparse_raster(self, bin_size=20):
         """
-        Bin all spike times and create a sparse array where entry
-        (i,j) is the number of times cell i fired in bin j. Bins are
-        left-open and right-closed intervals except the first, which
-        will capture any spikes occurring exactly at t=0.
+        Bin all spike times and create a sparse array where entry (i,j) is the number of
+        times unit i fired in bin j.
+
+        Bins are left-open and right-closed intervals except the first, which will
+        capture any spikes occurring exactly at t=0.
         """
         indices = np.hstack([np.ceil(ts / bin_size) - 1 for ts in self.train]).astype(
             int
@@ -473,8 +493,11 @@ class SpikeData:
 
     def raster(self, bin_size=20):
         """
-        Bin all spike times and create a dense array where entry
-        (i,j) is the number of times cell i fired in bin j.
+        Bin all spike times and create a dense array where entry (i,j) is the number of
+        times cell i fired in bin j.
+
+        Bins are left-open and right-closed intervals except the first, which will
+        capture any spikes occurring exactly at t=0.
         """
         return self.sparse_raster(bin_size).toarray()
 
@@ -483,15 +506,15 @@ class SpikeData:
         return [np.diff(ts) for ts in self.train]
 
     def isi_skewness(self):
-        "Skewness of interspike interval distribution."
+        "Calculate the skewness of the interspike interval distribution for each unit."
         # TODO generate better synthetic data to test this
         intervals = self.interspike_intervals()
         return [stats.skew(intl) for intl in intervals]
 
     def isi_log_histogram(self, bin_num=300):
         """
-        Logarithmic (log base 10) interspike interval histogram.
-        Return histogram and bins in log10 scale.
+        Histogram of interspike intervals with logarithmic bin spacing. Returns both the
+        histogram and the generated bin edges.
         """
         # TODO missing tests
         intervals = self.interspike_intervals()
@@ -506,12 +529,12 @@ class SpikeData:
 
     def isi_threshold_cma(self, hist, bins, coef=1):
         """
-        Calculate interspike interval threshold from cumulative moving
-        average [1]. The threshold is the bin that has the max CMA on
-        the interspike interval histogram. Histogram and bins are
-        logarithmic by default. `coef` is an input variable for
-        threshold.
-        [1] Kapucu, et al. Frontiers in computational neuroscience 6 (2012): 38
+        Calculate interspike interval threshold from cumulative moving average [1]. The
+        threshold is the bin that has the maximum CMA on the interspike interval
+        histogram. Histogram and bins are logarithmic by default. `coef` is an input
+        variable for threshold.
+
+        [1] Kapucu, et al. Frontiers in Computational Neuroscience 6:38 (2012)
         """
         # TODO missing tests
         isi_thr = []
@@ -530,20 +553,23 @@ class SpikeData:
 
     def burstiness_index(self, bin_size=40):
         """
-        Compute the burstiness index [1], a number from 0 to 1 which
-        quantifies synchronization of activity in neural cultures.
-        Spikes are binned, and the fraction of spikes accounted for by
-        the top 15% will be 0.15 if activity is fully asynchronous, and
-        1.0 if activity is fully synchronized into just a few bins. This
-        is linearly rescaled to the range 0--1 for clearer interpretation.
-        [1] Wagenaar, Madhavan, Pine & Potter. Controlling bursting
-            in cortical cultures with closed-loop multi-electrode
-            stimulation. J Neurosci 25:3, 680–688 (2005).
+        Compute the burstiness index [1], a number from 0 to 1 which quantifies
+        synchronization of activity in neural cultures.
+
+        Spikes are binned, and the fraction of spikes accounted for by the top 15% is
+        calculated. This will be 0.15 if activity is fully asynchronous, and 1.0 if
+        activity is fully synchronized into just a few bins. The result is rescaled to
+        the range 0-1 for clearer interpretation.
+
+        [1] Wagenaar, Madhavan, Pine & Potter. Controlling bursting in cortical cultures
+            with closed-loop multi-electrode stimulation. Journal of Neuroscience 25:3,
+            680–688 (2005).
         """
         binned = self.binned(bin_size)
         binned.sort()
         N85 = int(np.round(len(binned) * 0.85))
 
+        # Special case to avoid an error when there is only one bin.
         if N85 == len(binned):
             return 1.0
         else:
@@ -552,8 +578,9 @@ class SpikeData:
 
     def concatenate_spike_data(self, sd):
         """
-        Modify `self` to include all the spikes from `sd` that occur before the end of
-        `self`.
+        Add the units from another SpikeData object to this one. The new units are
+        assigned indices starting from the end of the current data. If the new units
+        have a longer spike train, it is truncated to the length of the current data.
         """
         #  TODO missing tests
         if sd.length != self.length:
@@ -563,11 +590,24 @@ class SpikeData:
         self.raw_data += sd.raw_data
         self.raw_time += sd.raw_time
         self.metadata.update(sd.metadata)
-        self.neuron_attributes += sd.neuron_attributes
+        if self.neuron_attributes and sd.neuron_attributes:
+            self.neuron_attributes += sd.neuron_attributes
+        elif self.neuron_attributes or sd.neuron_attributes:
+            warnings.warn(
+                "Concatenating SpikeData where one has no neuron_attributes.",
+                RuntimeWarning,
+            )
 
     def spike_time_tilings(self, delt=20):
         """
-        Compute the full spike time tiling coefficient matrix.
+        Compute the full spike time tiling coefficient matrix. STTC is a metric for
+        correlation between spike trains with some improved intuitive properties
+        compared to the Pearson correlation coefficient. Spike trains are lists of spike
+        times sorted in ascending order.
+
+        [1] Cutts & Eglen. Detecting pairwise correlations in spike trains: An objective
+            comparison of methods and application to the study of retinal waves. Jouranl
+            of Neuroscience 34:43, 14288–14303 (2014).
         """
         T = self.length
         ts = [_sttc_ta(ts, delt, T) / T for ts in self.train]
@@ -583,15 +623,20 @@ class SpikeData:
     def spike_time_tiling(self, i, j, delt=20):
         """
         Calculate the spike time tiling coefficient between two units within
-        this SpikeData.
+        this SpikeData. STTC is a metric for correlation between spike trains with some
+        improved intuitive properties compared to the Pearson correlation coefficient.
+        Spike trains are lists of spike times sorted in ascending order.
+
+        [1] Cutts & Eglen. Detecting pairwise correlations in spike trains: An objective
+            comparison of methods and application to the study of retinal waves. Jouranl
+            of Neuroscience 34:43, 14288–14303 (2014).
         """
         return spike_time_tiling(self.train[i], self.train[j], delt, self.length)
 
     def avalanches(self, thresh, bin_size=40):
         """
-        Bin the spikes in this data, and group the result into lists
-        corresponding to avalanches, defined as deviations above
-        a given threshold spike count.
+        Bin the spikes in this data, and group the result into lists corresponding to
+        avalanches, defined as deviations above a given threshold spike count.
         """
         counts = self.binned(bin_size)
         active = counts > thresh
@@ -613,8 +658,8 @@ class SpikeData:
 
     def avalanche_duration_size(self, thresh, bin_size=40):
         """
-        Collect the avalanches in this data and regroup them into
-        a pair of lists: durations and sizes.
+        Collect the avalanches in this data and regroup them into a pair of lists:
+        durations and sizes.
         """
         durations, sizes = [], []
         for avalanche in self.avalanches(thresh, bin_size):
@@ -626,19 +671,19 @@ class SpikeData:
         self, quantile=0.35, bin_size=40, N=1000, pval_truncated=0.05
     ):
         """
-        Calculates the deviation from criticality according to the
-        method of Ma et al. (2019), who used the relationship of the
-        dynamical critical exponent to the exponents of the separate
-        power laws corresponding to the avalanche size and duration
-        distributions as a metric for suboptimal cortical function
-        following monocular deprivation.
-        The returned DCCResult struct contains not only the DCC metric
-        itself but also the significance of the hypothesis that the
-        size and duration distributions of the extracted avalanches
-        are poorly fit by power laws.
-        [1] Ma, Z., Turrigiano, G. G., Wessel, R. & Hengen, K. B.
-            Cortical circuit dynamics are homeostatically tuned to
-            criticality in vivo. Neuron 104, 655-664.e4 (2019).
+        Calculates the deviation from criticality according to the method of Ma et al.
+        (2019), who used the relationship of the dynamical critical exponent to the
+        exponents of the separate power laws corresponding to the avalanche size and
+        duration distributions as a metric for suboptimal cortical function following
+        monocular deprivation.
+
+        The returned DCCResult struct contains not only the DCC metric itself but also
+        the significance of the hypothesis that the size and duration distributions of
+        the extracted avalanches are poorly fit by power laws.
+
+        [1] Ma, Z., Turrigiano, G. G., Wessel, R. & Hengen, K. B. Cortical circuit
+            dynamics are homeostatically tuned to criticality in vivo. Neuron 104,
+            655-664.e4 (2019).
         """
         # Calculate the spike count threshold corresponding to
         # the given quantile.
@@ -664,8 +709,9 @@ class SpikeData:
 
     def latencies(self, times, window_ms=100):
         """
-        Given a sorted list of times, compute the latencies from that time to
-        each spike in the train within a window
+        Given a sorted list of times, compute the latencies from that time to each spike
+        in each spike train within a window.
+
         :param times: list of times
         :param window_ms: window in ms
         :return: 2d list, each row is a list of latencies
@@ -698,7 +744,8 @@ class SpikeData:
 
     def latencies_to_index(self, i, window_ms=100):
         """
-        Given an index, compute latencies using self.latencies()
+        Compute the latency from one unit to all other units via self.latencies().
+
         :param i: index of the unit
         :param window_ms: window in ms
         :return: 2d list, each row is a list of latencies per neuron
@@ -708,10 +755,9 @@ class SpikeData:
 
     def randomized(self, bin_size_ms=1.0, seed=None):
         """
-        Create a new SpikeData object which preserves the population
-        rate and mean firing rate of each neuron in an existing
-        SpikeData by randomly reallocating all spike times to different
-        neurons at a resolution given by dt.
+        Create a new SpikeData object which preserves the population rate and mean
+        firing rate of each neuron in an existing SpikeData by randomly reallocating all
+        spike times to different neurons at a resolution given by dt.
         """
         # TODO missing tests
         return SpikeData.from_raster(
@@ -724,7 +770,9 @@ class SpikeData:
 
     def population_firing_rate(self, bin_size=10, w=5, average=False):
         """
-        Population firing rate of all units in the SpikeData object.
+        Calculate binned population firing rate, smoothed by a moving average filter of
+        width w bins. If average is True, divide the result by N to yield the population
+        average firing rate instead of the total population rate (default).
         """
         # TODO missing tests
         bins, pop_rate = population_firing_rate(
@@ -736,7 +784,8 @@ class SpikeData:
 def population_firing_rate(trains, rec_length=None, bin_size=10, w=5, average=False):
     """
     Calculate population firing rate for given spike trains.
-    :param trains: a list of spike trains. Can take only one unit
+
+    :param trains: a list of spike trains, or a single combined spike train.
     :param rec_length: length of the recording.
                        If None, the maximum spike time is used.
     :param bin_size: binning width
@@ -769,14 +818,14 @@ def population_firing_rate(trains, rec_length=None, bin_size=10, w=5, average=Fa
 
 def spike_time_tiling(tA, tB, delt=20, length=None):
     """
-    Calculate the spike time tiling coefficient [1] between two spike trains.
-    STTC is a metric for correlation between spike trains with some improved
-    intuitive properties compared to the Pearson correlation coefficient.
-    Spike trains are lists of spike times sorted in ascending order.
+    Calculate the spike time tiling coefficient [1] between two spike trains. STTC is a
+    metric for correlation between spike trains with some improved intuitive properties
+    compared to the Pearson correlation coefficient. Spike trains are lists of spike
+    times sorted in ascending order.
 
-    [1] Cutts & Eglen. Detecting pairwise correlations in spike trains:
-        An objective comparison of methods and application to the study of
-        retinal waves. J Neurosci 34:43, 14288–14303 (2014).
+    [1] Cutts & Eglen. Detecting pairwise correlations in spike trains: An objective
+        comparison of methods and application to the study of retinal waves. Journal of
+        Neuroscience 34:43, 14288–14303 (2014).
     """
     if length is None:
         length = max(tA[-1], tB[-1])
@@ -801,10 +850,9 @@ def _spike_time_tiling(tA, tB, TA, TB, delt):
 
 def best_effort_sample(counts, M, rng=np.random):
     """
-    Given a discrete distribution over the integers 0...N-1 in the form of
-    an array of N counts, sample M elements from the distribution without
-    replacement if possible. If not possible, sample with replacement but
-    without exceeding the counts.
+    Given a discrete distribution over the integers 0...N-1 in the form of an array of N
+    counts, sample M elements from the distribution without replacement if possible. If
+    not possible, sample with replacement but without exceeding the counts.
     """
     N = len(counts)
     try:
@@ -822,8 +870,8 @@ def best_effort_sample(counts, M, rng=np.random):
 
 def randomize_raster(raster, seed=None):
     """
-    Randomize a raster by taking out all the spikes in each time bin and
-    randomly reallocating them from the total spikes of each neuron.
+    Randomize a raster by taking out all the spikes in each time bin and randomly
+    reallocating them from the total spikes of each neuron.
     """
     rsm = np.zeros(raster.shape, int)
     weights = raster.sum(1)
@@ -845,10 +893,10 @@ def randomize_raster(raster, seed=None):
 
 def _resampled_isi(spikes, times, sigma_ms):
     """
-    Calculate the firing rate of a spike train at specific times, based on
-    the reciprocal inter-spike interval. It is assumed to have been sampled
-    halfway between any two given spikes, interpolated, and then smoothed by
-    a Gaussian kernel with the given width.
+    Helper method for calculating the firing rate of a spike train at specific times,
+    based on the reciprocal inter-spike interval. It is assumed to have been sampled
+    halfway between any two given spikes, interpolated, and then smoothed by a Gaussian
+    kernel with the given width.
     """
     if len(spikes) == 0:
         return np.zeros_like(times)
@@ -871,18 +919,17 @@ def _resampled_isi(spikes, times, sigma_ms):
 
 def _p_and_alpha(data, N_surrogate=1000, pval_truncated=0.0):
     """
-    Perform a power-law fit to some data, and return a p-value for the
-    hypothesis that this fit is poor, together with just the exponent
-    of the fit.
+    Helper method for DCC that performs a power-law fit to some data, and returns a
+    p-value for the hypothesis that this fit is poor, together with just the exponent of
+    the fit.
 
-    A positive value of `pval_truncated` means to allow the hypothesis
-    of a truncated power law, which must be better than the plain
-    power law with the given significance under powerlaw's default
-    nested hypothesis comparison test.
+    A positive value of `pval_truncated` means to allow the hypothesis of a truncated
+    power law, which must be better than the plain power law with the given significance
+    under powerlaw's default nested hypothesis comparison test.
 
-    The returned significance value is computed by sampling N surrogate
-    datasets and counting what fraction are further from the fitted
-    distribution according to the one-sample Kolmogorov-Smirnoff test.
+    The returned significance value is computed by sampling N surrogate datasets and
+    counting what fraction are further from the fitted distribution according to the
+    one-sample Kolmogorov-Smirnoff test.
     """
     # Perform the fits and compare the distributions with IO
     # silenced because there's no option to disable printing
@@ -921,8 +968,8 @@ def _p_and_alpha(data, N_surrogate=1000, pval_truncated=0.0):
 
 def _train_from_i_t_list(idces, times, N):
     """
-    Given lists of spike times and indices, produce a list whose
-    ith entry is a list of the spike times of the ith unit.
+    Helper method for SpikeData constructors: given lists of spike times and indices,
+    produce a list whose ith entry is a list of the spike times of the ith unit.
     """
     idces, times = np.asarray(idces), np.asarray(times)
     if N is None:
@@ -936,27 +983,23 @@ def _train_from_i_t_list(idces, times, N):
 
 def fano_factors(raster):
     """
-    Given arrays of spike times and the corresponding units which
-    produced them, computes the Fano factor of the corresponding spike
-    raster.
+    Given arrays of spike times and the corresponding units which produced them,
+    computes the Fano factor of the corresponding spike raster.
 
-    If a unit doesn't fire, a Fano factor of 1 is returned because in
-    the limit of events happening at a rate ε->0, either as
-    a Bernoulli process or in the many-bins limit of a single event,
-    the Fano factor converges to 1.
+    If a unit doesn't fire, a Fano factor of 1 is returned because in the limit of
+    events happening at a rate ε->0, either as a Bernoulli process or in the many-bins
+    limit of a single event, the Fano factor converges to 1.
     """
     if sparse.issparse(raster):
         mean = np.array(raster.mean(1)).ravel()
         moment = np.array(raster.multiply(raster).mean(1)).ravel()
 
-        # Silly numbers to make the next line return f=1 for a unit
-        # that never spikes.
+        # Silly numbers to make the next line return f=1 for a unit that never spikes.
         moment[mean == 0] = 2
         mean[mean == 0] = 1
 
-        # This is the variance/mean ratio computed in a sparse-friendly
-        # way. This algorithm is numerically unstable in general, but
-        # should only be a problem if your bin size is way too big.
+        # This is the variance/mean ratio computed in a sparse-friendly way. This
+        # algorithm is numerically unstable, but it's the best we can do.
         return moment / mean - mean
 
     else:
@@ -968,9 +1011,8 @@ def fano_factors(raster):
 
 def _sttc_ta(tA, delt, tmax):
     """
-    Helper function for spike time tiling coefficients: calculate the
-    total amount of time within a range delt of spikes within the
-    given sorted list of spike times tA.
+    Helper function for spike time tiling coefficients: calculate the total amount of
+    time within a range delt of spikes within the given sorted list of spike times tA.
     """
     if len(tA) == 0:
         return 0
@@ -981,9 +1023,9 @@ def _sttc_ta(tA, delt, tmax):
 
 def _sttc_na(tA, tB, delt):
     """
-    Helper function for spike time tiling coefficients: given two
-    sorted lists of spike times, calculate the number of spikes in
-    spike train A within delt of any spike in spike train B.
+    Helper function for spike time tiling coefficients: given two sorted lists of spike
+    times, calculate the number of spikes in spike train A within delt of any spike in
+    spike train B.
     """
     if len(tB) == 0:
         return 0
@@ -1004,10 +1046,9 @@ def _sttc_na(tA, tB, delt):
 
 def pearson(spikes):
     """
-    Compute a Pearson correlation coefficient matrix for a spike
-    raster. Includes a sparse-friendly method for very large spike
-    rasters, but falls back on np.corrcoef otherwise because this
-    method can be numerically unstable.
+    Compute a Pearson correlation coefficient matrix for a spike raster. Includes a
+    sparse-friendly method for very large spike rasters, but falls back on np.corrcoef
+    otherwise because this method can be numerically unstable.
     """
     if not sparse.issparse(spikes):
         return np.corrcoef(spikes)
@@ -1047,8 +1088,9 @@ def cumulative_moving_average(hist):
 
 def burst_detection(spike_times, burst_threshold, spike_num_thr=3):
     """
-    Detect burst from spike times with a interspike interval
-    threshold (burst_threshold) and a spike number threshold (spike_num_thr).
+    Detect burst from spike times with a interspike interval threshold (burst_threshold)
+    and a spike number threshold (spike_num_thr).
+
     Returns:
         spike_num_list -- a list of burst features
           [index of burst start point, number of spikes in this burst]
@@ -1076,6 +1118,7 @@ def burst_detection(spike_times, burst_threshold, spike_num_thr=3):
 def butter_filter(data, lowcut=None, highcut=None, fs=20000.0, order=5):
     """
     A digital butterworth filter. Type is based on input value.
+
     Inputs:
         data: array_like data to be filtered
         lowcut: low cutoff frequency. If None or 0, highcut must be a number.
@@ -1086,7 +1129,8 @@ def butter_filter(data, lowcut=None, highcut=None, fs=20000.0, order=5):
         In this case, lowcut must be smaller than highcut.
         fs: sample rate
         order: order of the filter
-    Return:
+
+    Returns:
         The filtered output with the same shape as data
     """
     # TODO missing tests - some will be covered by SpikeData.from_thresholding()
