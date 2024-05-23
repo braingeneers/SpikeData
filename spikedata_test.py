@@ -127,7 +127,6 @@ class SpikeDataTest(unittest.TestCase):
         bin_size = 1.0
         r = sd.raster(bin_size) != 0
         r2 = SpikeData.from_raster(r, bin_size).raster(bin_size)
-        print(r - r2)
         self.assertAll(r == r2)
 
         # Test subset() constructor.
@@ -136,9 +135,10 @@ class SpikeDataTest(unittest.TestCase):
         for i, j in enumerate(idces):
             self.assertAll(sdsub.train[i] == sd.train[j])
 
-        # Make sure you can subset by neuron_data, not just raw index.
+        # Make sure you can subset by neuron_data, not just raw index, and that order
+        # does not matter for this operation.
         sdsub = sd6.subset([1, 2])
-        sdsub2 = sd6.subset([2, 3], by="nest_id")
+        sdsub2 = sd6.subset([3, 2], by="nest_id")
         self.assertSpikeDataEqual(sdsub, sdsub2)
 
         # Test subtime() constructor idempotence.

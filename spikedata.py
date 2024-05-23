@@ -339,26 +339,30 @@ class SpikeData:
     def subset(self, units, by=None):
         """
         Return a new SpikeData with spike times for only some units, selected either by
-        their indices or by an ID stored under a given key in the neuron_attributes. If
-        IDs are not unique, every neuron which matches is included in the output.
-        Metadata and raw data are propagated exactly, while neuron data is subsetted in
-        the same way as the spike trains.
+        their indices or by an ID stored under a given key in the neuron_attributes.
+
+        Units are included in the output according to their order in self.train, not the
+        order in the unit list (which is treated as a set).
+
+        If IDs are not unique, every neuron which matches is included in the output.
+        Neurons whose neuron_attributes entry does not have the key are always excluded.
         """
+        units = set(units)
         if by is not None:
-            if self.neuron_attributes is None:
-                raise ValueError("Cannot subset by neuron_attributes: none defined.")
             _missing = object()
-            units = [
+            units = {
                 i
                 for i in range(self.N)
                 if getattr(self.neuron_attributes[i], by, _missing) in units
-            ]
+            }
 
-        train = [ts for i, ts in enumerate(self.train) if i in units]
-
-        neuron_attributes = None
-        if self.neuron_attributes:
-            neuron_attributes = [self.neuron_attributes[i] for i in units]
+        train = []
+        neuron_attributes = [] if self.neuron_attributes else None
+        for i, ts in enumerate(self.train):
+            if i in units:
+                train.append(ts)
+                if neuron_attributes is not None:
+                    neuron_attributes.append(self.neuron_attributes[i])
 
         return SpikeData(
             train,
