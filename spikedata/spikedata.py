@@ -157,6 +157,24 @@ class SpikeData:
         return SpikeData.from_idces_times(idces, times, N, **kwargs)
 
     @staticmethod
+    def from_neo_spiketrains(spiketrains, **kwargs):
+        """
+        Create a SpikeData object from a list of neo.SpikeTrain objects. The spike times
+        can be in any units, as they will be converted to regular np.arrays in units of
+        milliseconds.
+        """
+        # This is done in a weird way that involves an extra copy of the data because
+        # there's no way to convert the units without modifying the object or importing
+        # Quantities. So we copy and in-place change units.
+        trains = [st.copy() for st in spiketrains]
+        for st in trains:
+            st.units = "ms"
+        # This on the other hand is NOT a copy, it just allocates new wrapper objects
+        # wihle leaving the data buffers intact. This is necessary because some key
+        # numpy ufuncs like np.sort() will not work on the Quantity objects.
+        return SpikeData([np.asarray(st) for st in spiketrains], **kwargs)
+
+    @staticmethod
     def from_mbt_neurons(neurons, **kwargs):
         """
         Create a SpikeData object from a list of Neuron objects as in the

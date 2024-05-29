@@ -5,6 +5,12 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import sparse, stats
 
+try:
+    import quantities
+    from neo.core import SpikeTrain
+except ImportError:
+    SpikeTrain = None
+
 # Import the module by path instead of going through the __init__ logic so we can access
 # all the hidden internal methods.
 import spikedata.spikedata as spikedata
@@ -80,6 +86,16 @@ class SpikeDataTest(unittest.TestCase):
         counts = np.random.randint(10, size=1000)
         sd = sd_from_counts(counts)
         self.assertAll(sd.binned(1) == counts)
+
+    @unittest.skipIf(SpikeTrain is None, "neo or quantities not installed")
+    def test_neo_conversion(self):
+        times = np.random.rand(100) * 100
+        idces = np.random.randint(5, size=100)
+        sd = SpikeData.from_idces_times(idces, times, length=100.0)
+
+        neo_trains = [SpikeTrain(t * quantities.ms, t_stop=100 * quantities.ms) for t in sd.train]
+        sdneo = SpikeData.from_neo_spiketrains(neo_trains)
+        self.assertSpikeDataEqual(sd, sdneo)
 
     def test_spike_data(self):
         # Generate a bunch of random spike times and indices.

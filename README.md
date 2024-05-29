@@ -49,11 +49,14 @@ All of the constructors also take a variety of metadata parameters.
 
     ```python
     nodes = nest.Create(...)
+    other_nodes = nest.Create(...)
     spike_recorder = nest.Create('spike_recorder')
     nest.Connect(spike_recorder, nodes)
     nest.Simulate(...)
-    spike_data = SpikeData.from_nest(spike_recorder, nodes)
+    spike_data = SpikeData.from_nest(spike_recorder, nodes, other_nodes)
     ```
+
+You can also get a `SpikeData` object from a list of spike trains represented using Neo (`neo.SpikeTrain` via `SpikeData.from_neo_spiketrains`) or MuscleBeachTools (`mbt.Neuron` via `SpikeData.from_mbt_neurons`).
 
 ### Accessing Spike Data
 
