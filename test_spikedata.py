@@ -5,7 +5,9 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import sparse, stats
 
-import spikedata
+# Import the module by path instead of going through the __init__ logic so we can access
+# all the hidden internal methods.
+import spikedata.spikedata as spikedata
 from spikedata import (
     SpikeData,
     best_effort_sample,
