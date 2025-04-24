@@ -20,6 +20,7 @@ __all__ = [
     "pearson",
     "population_firing_rate",
     "randomize_raster",
+    "randomize_raster_greedy",
     "spike_time_tiling",
 ]
 
@@ -490,7 +491,7 @@ class SpikeData:
             metadata=self.metadata + spikeData.metadata,
         )
 
-    def sparse_raster(self, bin_size=20):
+    def sparse_raster(self, bin_size=20.0):
         """
         Bin all spike times and create a sparse array where entry (i,j) is the number of
         times unit i fired in bin j.
@@ -771,15 +772,17 @@ class SpikeData:
         # TODO missing tests
         return self.latencies(self.train[i], window_ms)
 
-    def randomized(self, bin_size_ms=1.0, seed=None):
+    def randomized(self, bin_size_ms=1.0, seed=None, method="poprate_greedy"):
         """
         Create a new SpikeData object which preserves the population rate and mean
         firing rate of each neuron in an existing SpikeData by randomly reallocating all
         spike times to different neurons at a resolution given by dt.
+
+        See `spikedata.randomize_raster()` for a list of supported methods.
         """
         # TODO missing tests
         return SpikeData.from_raster(
-            randomize_raster(self.sparse_raster(bin_size_ms), seed=seed),
+            randomize_raster(self.sparse_raster(bin_size_ms), seed, method),
             bin_size_ms,
             length=self.length,
             metadata=self.metadata,
@@ -886,10 +889,79 @@ def best_effort_sample(counts, M, rng=np.random):
         return ret
 
 
-def randomize_raster(raster, seed=None):
+def randomize_raster(raster, seed: int | None = None, method="poprate_greedy"):
     """
-    Randomize a raster by taking out all the spikes in each time bin and randomly
-    reallocating them from the total spikes of each neuron.
+    Generate a randomized version of a spike raster by reassigning all its spike times
+    to new bins, while preserving the total number of spikes for each unit.
+
+    Supported randomization methods:
+    - `poprate_greedy` preserves the population rate with an efficient algorithm, but
+      may in some cases assign multiple spikes to a single bin.
+    - `poprate_okun` preserves population rate and does not create spurious multi-spike
+      bins, but only works when there is at most one spike per unit per bin.
+    """
+    if method == "poprate_greedy":
+        return randomize_raster_greedy(raster, seed)
+    elif method == "poprate_okun":
+        return randomize_raster_okun(raster, seed)
+    else:
+        raise ValueError(f"Unsupported randomization method `{method}`.")
+
+
+def _okun_swap(ar, idxs, rng):
+    idx0 = rng.randint(len(idxs[0]))
+    idx1 = rng.randint(len(idxs[0]))
+    i0, j0 = idxs[0][idx0], idxs[1][idx0]
+    i1, j1 = idxs[0][idx1], idxs[1][idx1]
+    if i0 == i1 or j0 == j1 or ar[i0, j1] == 1.0 or ar[i1, j0] == 1.0:
+        return False
+    ar[i0, j0] = ar[i1, j1] = 0.0
+    ar[i0, j1] = ar[i1, j0] = 1.0
+    idxs[0][idx0], idxs[1][idx0] = i0, j1
+    idxs[0][idx1], idxs[1][idx1] = i1, j0
+    return True
+
+
+def randomize_raster_okun(raster, seed: int | None = None, swap_per_spike=5):
+    """
+    Generate a randomized version of a spike raster, preserving population rate. The
+    input raster MUST have at most one spike per neuron per bin!
+
+    Algorithm due to Okun et al. (2015) "Diverse coupling of neurons to populations in
+    sensory cortex," implementation by TJ van der Molen from "Protosequences in human
+    cortical organoids model intrinsic states in the developing cortex."
+    """
+    rng = np.random.RandomState(seed)
+    raster = raster.copy()
+    idxs = np.where(raster == 1.0)
+    cnt_swap = 0
+    for _ in range(int((swap_per_spike + 1) * np.sum(raster))):
+        if _okun_swap(raster, idxs, rng):
+            cnt_swap += 1
+
+    if cnt_swap < swap_per_spike * np.sum(raster):
+        for _ in range(int((swap_per_spike + 1) * np.sum(raster))):
+            if _okun_swap(raster, idxs, rng):
+                cnt_swap += 1
+
+    if cnt_swap < swap_per_spike * np.sum(raster):
+        print(
+            "ERROR: Insufficient successful swaps, only {} of {} required".format(
+                cnt_swap, swap_per_spike * np.sum(raster)
+            )
+        )
+
+    return raster
+
+
+def randomize_raster_greedy(raster, seed: int | None = None):
+    """
+    Generate a randomized version of a spike raster, preserving population rate.
+
+    This method greedily reassigns all spikes (going from the most to least active bin),
+    meaning that it is relatively fast, but in some cases, it may have to allocate
+    multiple spikes to the same neuron in one time bin, even if that was not true in the
+    original input.
     """
     rsm = np.zeros(raster.shape, int)
     weights = raster.sum(1)
@@ -957,9 +1029,11 @@ def _p_and_alpha(data, N_surrogate=1000, pval_truncated=0.0):
     except ImportError:
         raise ImportError("The powerlaw library is required to compute DCC.")
 
-    with open(os.devnull, "w") as f, contextlib.redirect_stdout(
-        f
-    ), contextlib.redirect_stderr(f):
+    with (
+        open(os.devnull, "w") as f,
+        contextlib.redirect_stdout(f),
+        contextlib.redirect_stderr(f),
+    ):
         fit = Fit(data)
         stat, p = fit.distribution_compare(
             "power_law", "truncated_power_law", nested=True
