@@ -10,6 +10,7 @@ try:
     from neo.core import SpikeTrain
 except ImportError:
     SpikeTrain = None
+    quantities = None
 
 # Import the module by path instead of going through the __init__ logic so we can access
 # all the hidden internal methods.
@@ -19,7 +20,7 @@ from spikedata import (
     best_effort_sample,
     fano_factors,
     pearson,
-    randomize_raster,
+    randomize_raster_greedy,
 )
 
 Neuron = namedtuple("Neuron", "spike_time fs")
@@ -93,7 +94,11 @@ class SpikeDataTest(unittest.TestCase):
         idces = np.random.randint(5, size=100)
         sd = SpikeData.from_idces_times(idces, times, length=100.0)
 
-        neo_trains = [SpikeTrain(t * quantities.ms, t_stop=100 * quantities.ms) for t in sd.train]
+        assert SpikeTrain is not None  # Type checker doesn't understand test skips.
+        assert quantities is not None  # Type checker doesn't understand test skips.
+        neo_trains = [
+            SpikeTrain(t * quantities.ms, t_stop=100 * quantities.ms) for t in sd.train
+        ]
         sdneo = SpikeData.from_neo_spiketrains(neo_trains)
         self.assertSpikeDataEqual(sd, sdneo)
 
@@ -141,6 +146,7 @@ class SpikeDataTest(unittest.TestCase):
             recorder, 1 + np.arange(3), 4 + np.arange(2), neuron_attributes=attrs
         )
         self.assertSpikeDataEqual(sd, sd7)
+        assert sd7.neuron_attributes is not None
         for i, (attr, neuron_attrs) in enumerate(zip(attrs, sd7.neuron_attributes)):
             self.assertEqual(attr.size, neuron_attrs.size)
             self.assertEqual(neuron_attrs.nest_id, i + 1)
@@ -442,7 +448,7 @@ class SpikeDataTest(unittest.TestCase):
         # Generate the times of a Poisson spike train, and ensure that
         # no spikes are lost in translation.
         N = 1000
-        times = stats.expon.rvs(size=N).cumsum()
+        times = np.cumsum(stats.expon.rvs(size=N))
         spikes = SpikeData([times])
         self.assertEqual(sum(spikes.binned(5)), N)
 
@@ -510,6 +516,7 @@ class SpikeDataTest(unittest.TestCase):
         # Make sure subset propagates all metadata and correctly
         # subsets the neuron_attributes.
         subset = [1, 3]
+        assert foo.neuron_attributes is not None
         truth = [foo.neuron_attributes[i] for i in subset]
         bar = foo.subset(subset)
         self.assertDictEqual(foo.metadata, bar.metadata)
@@ -587,9 +594,15 @@ class SpikeDataTest(unittest.TestCase):
         # Can do negative
         self.assertAlmostEqual(a.latencies([0.1])[0][0], -0.1)
 
+    def test_okun_randomization(self):
+        r = np.random.rand(100, 1000) < 0.1
+        rr = spikedata.randomize_raster_okun(r)
+        self.assertAll(r.sum(0) == rr.sum(0))
+        self.assertAll(r.sum(1) == rr.sum(1))
+
     def test_base_randomization(self):
         r = np.random.rand(100, 1000) < 0.1
-        rr = randomize_raster(r)
+        rr = randomize_raster_greedy(r)
         self.assertAll(r.sum(0) == rr.sum(0))
         self.assertAll(r.sum(1) == rr.sum(1))
 
@@ -615,12 +628,12 @@ class SpikeDataTest(unittest.TestCase):
         # Having this rate too high is causing a ValueError.
         rates = np.linspace(0.0, 0.5, 100)
         r = np.random.rand(len(rates), 1000) < rates[:, np.newaxis]
-        rr = randomize_raster(r)
+        rr = randomize_raster_greedy(r)
         self.assertAll(r.sum(0) == rr.sum(0))
         self.assertAll(r.sum(1) == rr.sum(1))
 
         # Also make sure it works on rasters with multiple spikes per bin.
         r = np.random.randint(10, size=(100, 1000))
-        rr = randomize_raster(r)
+        rr = randomize_raster_greedy(r)
         self.assertAll(r.sum(0) == rr.sum(0))
         self.assertAll(r.sum(1) == rr.sum(1))

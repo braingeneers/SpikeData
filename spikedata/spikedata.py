@@ -510,7 +510,7 @@ class SpikeData:
         ret = sparse.csr_array((values, indices, indptr), shape=(self.N, length))
         return ret
 
-    def raster(self, bin_size=20):
+    def raster(self, bin_size=20.0):
         """
         Bin all spike times and create a dense array where entry (i,j) is the number of
         times cell i fired in bin j.
@@ -570,7 +570,7 @@ class SpikeData:
             isi_thr.append(thr)
         return isi_thr
 
-    def burstiness_index(self, bin_size=40):
+    def burstiness_index(self, bin_size=40.0):
         """
         Compute the burstiness index [1], a number from 0 to 1 which quantifies
         synchronization of activity in neural cultures.
@@ -617,7 +617,7 @@ class SpikeData:
                 RuntimeWarning,
             )
 
-    def spike_time_tilings(self, delt=20):
+    def spike_time_tilings(self, delt=20.0):
         """
         Compute the full spike time tiling coefficient matrix. STTC is a metric for
         correlation between spike trains with some improved intuitive properties
@@ -639,7 +639,7 @@ class SpikeData:
                 )
         return ret
 
-    def spike_time_tiling(self, i, j, delt=20):
+    def spike_time_tiling(self, i, j, delt=20.0):
         """
         Calculate the spike time tiling coefficient between two units within
         this SpikeData. STTC is a metric for correlation between spike trains with some
@@ -652,7 +652,7 @@ class SpikeData:
         """
         return spike_time_tiling(self.train[i], self.train[j], delt, self.length)
 
-    def avalanches(self, thresh, bin_size=40):
+    def avalanches(self, thresh, bin_size=40.0):
         """
         Bin the spikes in this data, and group the result into lists corresponding to
         avalanches, defined as deviations above a given threshold spike count.
@@ -726,7 +726,7 @@ class SpikeData:
         # Return the DCC value and significance.
         return DCCResult(dcc=dcc, p_size=p_size, p_duration=p_dur)
 
-    def latencies(self, times, window_ms=100):
+    def latencies(self, times, window_ms=100.0):
         """
         Given a sorted list of times, compute the latencies from that time to each spike
         in each spike train within a window.
@@ -761,7 +761,7 @@ class SpikeData:
             latencies.append(cur_latencies)
         return latencies
 
-    def latencies_to_index(self, i, window_ms=100):
+    def latencies_to_index(self, i, window_ms=100.0):
         """
         Compute the latency from one unit to all other units via self.latencies().
 
