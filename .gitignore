@@ -3,3 +3,7 @@ __pycache__/
 *.py[cod]
 .coverage
 build/
+
+# This is a library, so let dependencies float.
+uv.lock
+.python-version

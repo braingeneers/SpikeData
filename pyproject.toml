@@ -1,0 +1,31 @@
+[project]
+name = "spikedata"
+version = "0.1.0"
+description = "Data structure and analysis for neural spike data"
+authors = [
+  { name = "UCSC Braingeneers", email = "ucscgi@ucsc.edu" },
+]
+maintainers = [
+  { name = "David", email = "dfparks@ucsc.edu" },
+  { name = "Alex", email = "atspaeth@ucsc.edu" },
+  { name = "Lon", email = "lblauvel@ucsc.edu" },
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy>=1.10.0",
+]
+
+[dependency-groups]
+all = [
+    "powerlaw>=1.5",
+]
+dev = [
+    "neo>=0.14.1",
+    "pytest>=8.3.5",
+    "scipy-stubs>=1.15.2.2",
+]
+
+[tool.basedpyright]
+typeCheckingMode = "standard"

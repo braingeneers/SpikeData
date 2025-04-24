@@ -406,7 +406,7 @@ class SpikeDataTest(unittest.TestCase):
         self.assertEqual(sttc[0, 1], foo.spike_time_tiling(0, 1, 1))
 
         # Default arguments, inferred value of tmax.
-        tmax = max(foo.train[0].ptp(), foo.train[1].ptp())
+        tmax = max(np.ptp(foo.train[0]), np.ptp(foo.train[1]))
         self.assertEqual(foo.spike_time_tiling(0, 1), foo.spike_time_tiling(0, 1, tmax))
 
         # The uncorrelated spike trains above should stay near zero.
