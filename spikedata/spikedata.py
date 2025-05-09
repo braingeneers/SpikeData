@@ -488,7 +488,7 @@ class SpikeData:
             neuron_attributes=self.neuron_attributes,
             raw_time=raw_time,
             raw_data=raw_data,
-            metadata=self.metadata + spikeData.metadata,
+            metadata={**spikeData.metadata, **self.metadata} # Append the dicts together
         )
 
     def sparse_raster(self, bin_size=20.0):
@@ -861,6 +861,8 @@ def spike_time_tiling(tA, tB, delt=20, length=None):
 
 def _spike_time_tiling(tA, tB, TA, TB, delt):
     "Internal helper method for the second half of STTC calculation."
+    if len(tA) == 0 or len(tB) == 0:
+        return 0
     PA = _sttc_na(tA, tB, delt) / len(tA)
     PB = _sttc_na(tB, tA, delt) / len(tB)
 
