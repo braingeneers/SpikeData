@@ -1,6 +1,6 @@
 [project]
 name = "spikedata"
-version = "0.1.0"
+version = "0.2.0"
 description = "Toolkit for processing spiking neural time series"
 authors = [
   { name = "UCSC Braingeneers", email = "ucscgi@ucsc.edu" },
