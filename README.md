@@ -1,5 +1,7 @@
 # SpikeData Package
 
+[![CI](https://github.com/braingeneers/SpikeData/actions/workflows/ci.yml/badge.svg)](https://github.com/braingeneers/SpikeData/actions/workflows/ci.yml)
+
 ## Overview
 
 SpikeData is a Python package designed for handling and analyzing neuronal spike data. It provides a suite of tools for loading, processing, and analyzing spike data from various in-memory sources such as NEST simulation outputs, lists of indices and times, spike raster matrices, and more.
