@@ -1,7 +1,7 @@
 [project]
 name = "spikedata"
 version = "0.1.0"
-description = "Data structure and analysis for neural spike data"
+description = "Toolkit for processing spiking neural time series"
 authors = [
   { name = "UCSC Braingeneers", email = "ucscgi@ucsc.edu" },
 ]
@@ -11,6 +11,20 @@ maintainers = [
 ]
 readme = "README.md"
 requires-python = ">=3.10"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering",
+  "Typing :: Typed",
+]
 dependencies = [
     "numpy",
     "scipy>=1.10.0",
