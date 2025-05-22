@@ -6,7 +6,6 @@ authors = [
   { name = "UCSC Braingeneers", email = "ucscgi@ucsc.edu" },
 ]
 maintainers = [
-  { name = "David", email = "dfparks@ucsc.edu" },
   { name = "Alex", email = "atspaeth@ucsc.edu" },
   { name = "Lon", email = "lblauvel@ucsc.edu" },
 ]
@@ -17,15 +16,21 @@ dependencies = [
     "scipy>=1.10.0",
 ]
 
-[dependency-groups]
+[project.optional-dependencies]
 all = [
     "powerlaw>=1.5",
 ]
+
+[dependency-groups]
 dev = [
     "neo>=0.14.1",
     "pytest>=8.3.5",
     "scipy-stubs>=1.15.2.2",
+    "spikedata[all]",
 ]
 
 [tool.basedpyright]
 typeCheckingMode = "standard"
+
+[tool.uv.sources]
+spikedata = { workspace = true }
