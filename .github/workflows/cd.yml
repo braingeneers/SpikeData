@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  dist-build:
+  build:
     name: Distribution Build
     runs-on: ubuntu-latest
     steps:
@@ -26,9 +26,9 @@ jobs:
       - name: Check wheels
         run: pipx run twine check dist/*
 
-  dist-test:
-    name: Distribution Test
-    needs: [dist-build]
+  test-pypi:
+    name: Publish to TestPYPI
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -67,7 +67,19 @@ jobs:
           python -c "import braingeneers; print(braingeneers.__version__)"
           echo "=== Done testing source tar file ==="
 
+  publish:
+    needs: [build, test-pypi]
+    name: Publish to PyPI
+    environment: pypi
+    permissions:
+      id-token: write
+    runs-on: ubuntu-latest
+    if: github.event-name == 'release' && github.event-action == 'published'
 
-
-
-
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: artifact
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@v1.12.4
+        if: startsWith(github.ref, 'refs/tags')
