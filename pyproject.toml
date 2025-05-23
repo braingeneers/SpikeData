@@ -1,6 +1,6 @@
 [project]
 name = "spikedata"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Toolkit for processing spiking neural time series"
 authors = [
   { name = "UCSC Braingeneers", email = "ucscgi@ucsc.edu" },
@@ -35,6 +35,9 @@ all = [
     "powerlaw>=1.5",
 ]
 
+[project.urls]
+Homepage = "https://github.com/braingeneers/SpikeData"
+
 [dependency-groups]
 dev = [
     "neo>=0.14.1",
@@ -49,3 +52,16 @@ typeCheckingMode = "standard"
 
 [tool.uv.sources]
 spikedata = { workspace = true }
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch]
+version.source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "spikedata/_version.py"
+
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
