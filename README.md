@@ -16,10 +16,10 @@ SpikeData is a Python package designed for handling and analyzing neuronal spike
 
 ## Installation
 
-You can install the SpikeData package via pip. 🚧 So far only from GitHub, not PyPI.
+For regular use, just install with pip from PyPI.
 
 ```bash
-pip install git+https://github.com/braingeneers/SpikeData
+pip install spikedata
 ```
 
 ## Working with SpikeData Objects
