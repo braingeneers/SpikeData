@@ -3,4 +3,4 @@
 from .spikedata import *  # noqa F401
 from ._version import version as __version__
 
-del spikedata  # noqa F821
+del spikedata, _version  # noqa F821
