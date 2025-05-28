@@ -267,20 +267,20 @@ class SpikeData:
         self.N = len(self.train)
 
         # Add the raw data if present, including generating raw time.
-        if (raw_data is None) != (raw_time is None):
-            raise ValueError(
-                "Must provide both or neither of " "`raw_data` and `raw_time`."
-            )
-        if raw_data is not None:
+        if raw_data is not None and raw_time is not None:
             self.raw_data = np.asarray(raw_data)
             self.raw_time = np.asarray(raw_time)
-            if self.raw_time.shape == ():
+            if np.ndim(self.raw_time) == 0:
                 self.raw_time = np.arange(self.raw_data.shape[-1]) / raw_time
             elif self.raw_data.shape[-1:] != self.raw_time.shape:
                 raise ValueError("Length of `raw_data` and " "`raw_time` must match.")
-        else:
+        elif raw_data is None and raw_time is None:
             self.raw_data = np.zeros((0, 0))
             self.raw_time = np.zeros((0,))
+        else:
+            raise ValueError(
+                "Must provide both or neither of " "`raw_data` and `raw_time`."
+            )
 
         # Add metadata and neuron_attributes, then validate that neuron_attributes
         # contains the right number of neurons.
