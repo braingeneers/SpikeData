@@ -6,8 +6,10 @@ import warnings
 from collections import namedtuple
 from dataclasses import dataclass
 from logging import getLogger
+from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import ndimage, signal, sparse, stats
 
 __all__ = [
@@ -190,12 +192,12 @@ class SpikeData:
 
     @staticmethod
     def from_thresholding(
-        data,
+        data: NDArray,
         fs_Hz=20e3,
         threshold_sigma=5.0,
-        filter=True,
+        filter: dict | bool = True,
         hysteresis=True,
-        direction="both",
+        direction: Literal["both", "up", "down"] = "both",
     ):
         """
         Create a SpikeData object from raw data by filtering and thresholding raw
@@ -236,7 +238,7 @@ class SpikeData:
         neuron_attributes=None,
         metadata={},
         raw_data=None,
-        raw_time=None,
+        raw_time: NDArray | float | None = None,
     ):
         """
         Initialize a SpikeData object using a list of spike trains, each a
@@ -487,7 +489,10 @@ class SpikeData:
             neuron_attributes=self.neuron_attributes,
             raw_time=raw_time,
             raw_data=raw_data,
-            metadata={**spikeData.metadata, **self.metadata} # Append the dicts together
+            metadata={
+                **spikeData.metadata,
+                **self.metadata,
+            },  # Append the dicts together
         )
 
     def sparse_raster(self, bin_size=20.0):
@@ -1197,7 +1202,13 @@ def burst_detection(spike_times, burst_threshold, spike_num_thr=3):
     return spike_num_list, burst_set
 
 
-def butter_filter(data, lowcut=None, highcut=None, fs=20000.0, order=5):
+def butter_filter(
+    data,
+    lowcut: float | None = None,
+    highcut: float | None = None,
+    fs=20000.0,
+    order=5,
+):
     """
     A digital butterworth filter. Type is based on input value.
 
@@ -1215,22 +1226,23 @@ def butter_filter(data, lowcut=None, highcut=None, fs=20000.0, order=5):
     Returns:
         The filtered output with the same shape as data
     """
-    assert (lowcut not in [None, 0]) or (
-        highcut != None
-    ), "Need at least a low cutoff (lowcut) or high cutoff (highcut) frequency!"
-    if (lowcut != None) and (highcut != None):
-        assert lowcut < highcut, "lowcut must be smaller than highcut"
-
-    if lowcut == None or lowcut == 0:
-        filter_type = "lowpass"
-        Wn = highcut / fs * 2
-    elif highcut == None:
-        filter_type = "highpass"
-        Wn = lowcut / fs * 2
-    else:
-        filter_type = "bandpass"
-        band = [lowcut, highcut]
-        Wn = [e / fs * 2 for e in band]
+    match (lowcut, highcut):
+        case None, None:
+            raise ValueError(
+                "Need at least a low cutoff (lowcut) or high cutoff (highcut) frequency!"
+            )
+        case None, _:
+            filter_type = "lowpass"
+            Wn = highcut / fs * 2
+        case _, None:
+            filter_type = "highpass"
+            Wn = lowcut / fs * 2
+        case _, _:
+            if lowcut >= highcut:
+                raise ValueError("lowcut must be smaller than highcut")
+            filter_type = "bandpass"
+            band = [lowcut, highcut]
+            Wn = [e / fs * 2 for e in band]
 
     filter_coeff = signal.iirfilter(
         order, Wn, analog=False, btype=filter_type, output="sos"
