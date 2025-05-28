@@ -5,7 +5,6 @@ import os
 import warnings
 from collections import namedtuple
 from dataclasses import dataclass
-from logging import getLogger
 from typing import Literal
 
 import numpy as np
@@ -27,8 +26,6 @@ __all__ = [
 ]
 
 DCCResult = namedtuple("DCCResult", "dcc p_size p_duration")
-
-logger = getLogger("spikedata")
 
 
 @dataclass
@@ -141,7 +138,6 @@ class SpikeData:
         else:
             for i, attrs in enumerate(neuron_attributes):
                 attrs.nest_id = cells[i]
-        print(neuron_attributes)
         return SpikeData(train, neuron_attributes=neuron_attributes, **kwargs)
 
     @staticmethod
@@ -951,8 +947,8 @@ def randomize_raster_okun(raster, seed: int | None = None, swap_per_spike=5):
                 cnt_swap += 1
 
     if cnt_swap < swap_per_spike * np.sum(raster):
-        print(
-            "ERROR: Insufficient successful swaps, only {} of {} required".format(
+        warnings.warn(
+            "Insufficient successful swaps, only {} of {} required".format(
                 cnt_swap, swap_per_spike * np.sum(raster)
             )
         )
