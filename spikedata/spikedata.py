@@ -333,13 +333,13 @@ class SpikeData:
         for start in np.arange(0, self.length, length - overlap):
             yield self.subtime(start, start + length)
 
-    def binned(self, bin_size=40):
+    def binned(self, bin_size=40.0):
         """
         Quantize time into intervals of bin_size and counts the number of events in
         each bin, considered as a lower half-open interval of times, with the exception
         that events at time precisely zero will be included in the first bin.
         """
-        return self.sparse_raster(bin_size).sum(0)
+        return self.sparse_raster(bin_size).sum(0)  # type: ignore
 
     def binned_meanrate(self, bin_size=40, unit="kHz"):
         """
@@ -389,6 +389,8 @@ class SpikeData:
         """
         units = set(units)
         if by is not None:
+            if self.neuron_attributes is None:
+                raise ValueError("can't use `by` without `neuron_attributes`")
             _missing = object()
             units = {
                 i
@@ -397,18 +399,18 @@ class SpikeData:
             }
 
         train = []
-        neuron_attributes = [] if self.neuron_attributes else None
+        neuron_attributes = []
         for i, ts in enumerate(self.train):
             if i in units:
                 train.append(ts)
-                if neuron_attributes is not None:
+                if self.neuron_attributes is not None:
                     neuron_attributes.append(self.neuron_attributes[i])
 
         return SpikeData(
             train,
             length=self.length,
             N=len(train),
-            neuron_attributes=neuron_attributes,
+            neuron_attributes=neuron_attributes or None,
             metadata=self.metadata,
             raw_time=self.raw_time,
             raw_data=self.raw_data,
@@ -832,7 +834,7 @@ def population_firing_rate(trains, rec_length=None, bin_size=10, w=5, average=Fa
     return bins, fr_pop
 
 
-def spike_time_tiling(tA, tB, delt=20, length=None):
+def spike_time_tiling(tA, tB, delt=20.0, length: float | None = None):
     """
     Calculate the spike time tiling coefficient [1] between two spike trains. STTC is a
     metric for correlation between spike trains with some improved intuitive properties
@@ -844,7 +846,7 @@ def spike_time_tiling(tA, tB, delt=20, length=None):
         Neuroscience 34:43, 14288–14303 (2014).
     """
     if length is None:
-        length = max(tA[-1], tB[-1])
+        length = float(max(tA[-1], tB[-1]))
 
     if len(tA) == 0 or len(tB) == 0:
         return 0.0
@@ -866,12 +868,15 @@ def _spike_time_tiling(tA, tB, TA, TB, delt):
     return (aa + bb) / 2
 
 
-def best_effort_sample(counts, M, rng=np.random):
+def best_effort_sample(counts, M, rng: np.random.Generator | None = None):
     """
     Given a discrete distribution over the integers 0...N-1 in the form of an array of N
     counts, sample M elements from the distribution without replacement if possible. If
     not possible, sample with replacement but without exceeding the counts.
     """
+    if rng is None:
+        rng = np.random.default_rng()
+
     N = len(counts)
     try:
         return rng.choice(N, size=M, replace=False, p=counts / counts.sum())
@@ -969,7 +974,7 @@ def randomize_raster_greedy(raster, seed: int | None = None):
     bin_order = bin_order[n_spikeses[bin_order] > 0]
 
     # Choose which units to assign spikes to in each bin.
-    rng = np.random.RandomState(seed)
+    rng = np.random.default_rng(seed)
     for bin in bin_order:
         for unit in best_effort_sample(weights, n_spikeses[bin], rng):
             weights[unit] -= 1
@@ -1070,7 +1075,7 @@ def _train_from_i_t_list(idces, times, N):
     return ret
 
 
-def fano_factors(raster):
+def fano_factors(raster: NDArray):
     """
     Given arrays of spike times and the corresponding units which produced them,
     computes the Fano factor of the corresponding spike raster.
@@ -1081,7 +1086,8 @@ def fano_factors(raster):
     """
     if sparse.issparse(raster):
         mean = np.array(raster.mean(1)).ravel()
-        moment = np.array(raster.multiply(raster).mean(1)).ravel()
+        prod = raster.multiply(raster)
+        moment = np.array(prod.mean(1)).ravel()  # type: ignore
 
         # Silly numbers to make the next line return f=1 for a unit that never spikes.
         moment[mean == 0] = 2
@@ -1092,25 +1098,25 @@ def fano_factors(raster):
         return moment / mean - mean
 
     else:
-        mean = np.asarray(raster).mean(1)
-        var = np.asarray(raster).var(1)
+        mean: NDArray = np.asarray(raster).mean(1)
+        var: NDArray = np.asarray(raster).var(1)
         mean[mean == 0] = var[mean == 0] = 1.0
         return var / mean
 
 
-def _sttc_ta(tA, delt, tmax):
+def _sttc_ta(tA, delt: float, tmax: float) -> float:
     """
     Helper function for spike time tiling coefficients: calculate the total amount of
     time within a range delt of spikes within the given sorted list of spike times tA.
     """
     if len(tA) == 0:
-        return 0
+        return 0.0
 
     base = min(delt, tA[0]) + min(delt, tmax - tA[-1])
     return base + np.minimum(np.diff(tA), 2 * delt).sum()
 
 
-def _sttc_na(tA, tB, delt):
+def _sttc_na(tA, tB, delt: float) -> int:
     """
     Helper function for spike time tiling coefficients: given two sorted lists of spike
     times, calculate the number of spikes in spike train A within delt of any spike in
@@ -1133,7 +1139,7 @@ def _sttc_na(tA, tB, delt):
     return (np.minimum(dt_left, dt_right) <= delt).sum()
 
 
-def pearson(spikes):
+def pearson(spikes: NDArray) -> NDArray[np.floating]:
     """
     Compute a Pearson correlation coefficient matrix for a spike raster. Includes a
     sparse-friendly method for very large spike rasters, but falls back on np.corrcoef
