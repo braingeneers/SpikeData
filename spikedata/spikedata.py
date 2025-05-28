@@ -800,7 +800,13 @@ class SpikeData:
         return bins, pop_rate
 
 
-def population_firing_rate(trains, rec_length=None, bin_size=10, w=5, average=False):
+def population_firing_rate(
+    trains: list[NDArray] | NDArray,
+    rec_length=None,
+    bin_size=10,
+    w=5,
+    average=False,
+):
     """
     Calculate population firing rate for given spike trains.
 
@@ -814,14 +820,12 @@ def population_firing_rate(trains, rec_length=None, bin_size=10, w=5, average=Fa
     :return: An array of the bins and an array of the frequency
              for the given units' spiking activity
     """
-    if isinstance(trains, (list, np.ndarray)) and not isinstance(
-        trains[0], (list, np.ndarray)
-    ):
-        N = 1
-    else:
-        N = len(trains)
+    if isinstance(trains, np.ndarray):
+        trains = [trains]
 
+    N = len(trains)
     trains = np.hstack(trains)
+
     if rec_length is None:
         rec_length = np.max(trains)
 
