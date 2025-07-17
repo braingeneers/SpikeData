@@ -383,6 +383,8 @@ class SpikeData:
         If IDs are not unique, every neuron which matches is included in the output.
         Neurons whose neuron_attributes entry does not have the key are always excluded.
         """
+        if isinstance(units, int):
+            units = [units]
         units = set(units)
         if by is not None:
             if self.neuron_attributes is None:

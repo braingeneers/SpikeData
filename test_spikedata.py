@@ -174,6 +174,10 @@ class SpikeDataTest(unittest.TestCase):
         sdsub2 = sd6.subset([3, 2], by="nest_id")
         self.assertSpikeDataEqual(sdsub, sdsub2)
 
+        # Test subset() with a single unit.
+        sdsub = sd.subset(1)
+        self.assertEqual(sdsub.N, 1)
+
         # Test subtime() constructor idempotence.
         sdtimefull = sd.subtime(0, 100)
         self.assertSpikeDataEqual(sd, sdtimefull)
