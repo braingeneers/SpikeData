@@ -680,13 +680,24 @@ class SpikeDataTest(unittest.TestCase):
     def test_channel_raster(self):
         # Create spike data with 4 neurons
         # Neurons 0,1 map to channel 0; neurons 2,3 map to channel 1
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(0),
+            ChannelAttributes(1),
+            ChannelAttributes(1),
+        ]
         sd = SpikeData(
-            [[0, 20, 40], [10, 30], [5, 25], [15, 35]], length=50
+            [[0, 20, 40], [10, 30], [5, 25], [15, 35]],
+            length=50,
+            neuron_attributes=attrs,
         )  # 4 neurons
 
-        # Test with array channel map
-        channel_map = [0, 0, 1, 1]
-        channel_raster = sd.channel_raster(channel_map, bin_size=10)
+        # Test auto-detection from neuron_attributes
+        channel_raster = sd.channel_raster(bin_size=10)
         self.assertEqual(channel_raster.shape[0], 2)  # 2 channels
         self.assertEqual(channel_raster.shape[1], 5)  # 5 bins (0-10, 10-20, ..., 40-50)
 
@@ -710,22 +721,29 @@ class SpikeDataTest(unittest.TestCase):
         self.assertEqual(channel_raster[1, 3], 1)  # Neuron 3 spike at 35
 
         # Test binary mode
-        channel_raster_binary = sd.channel_raster(channel_map, bin_size=10, binary=True)
+        channel_raster_binary = sd.channel_raster(bin_size=10, binary=True)
         self.assertAll((channel_raster_binary == 0) | (channel_raster_binary == 1))
         # Should have same pattern but with max value 1
         self.assertAll(channel_raster_binary <= 1)
 
         # Test sparse version
-        sparse_channel_raster = sd.sparse_channel_raster(channel_map, bin_size=10)
+        sparse_channel_raster = sd.sparse_channel_raster(bin_size=10)
         self.assertTrue(sparse.issparse(sparse_channel_raster))
         self.assertAll(sparse_channel_raster.toarray() == channel_raster)
 
-        # Test with dict channel map
-        channel_map_dict = {0: 0, 1: 0, 2: 1, 3: 1}
-        channel_raster_dict = sd.channel_raster(channel_map_dict, bin_size=10)
-        self.assertAll(channel_raster_dict == channel_raster)
+        # Test with custom attribute name
+        channel_raster_attr = sd.channel_raster(
+            bin_size=10, attribute_name="channel_id"
+        )
+        self.assertAll(channel_raster_attr == channel_raster)
 
-        # Test with neuron_attributes
+        # Test error case - no channel mapping available
+        sd_no_map = SpikeData([[0, 20, 40], [10, 30], [5, 25], [15, 35]], length=50)
+        with self.assertRaises(ValueError):
+            sd_no_map.channel_raster(bin_size=10)  # No channel mapping available
+
+    def test_frame_channel_raster(self):
+        # Test combining frame-level binning with channel aggregation
         @dataclass
         class ChannelAttributes:
             channel_id: int
@@ -734,35 +752,16 @@ class SpikeDataTest(unittest.TestCase):
             ChannelAttributes(0),
             ChannelAttributes(0),
             ChannelAttributes(1),
-            ChannelAttributes(1),
         ]
-        sd_with_attrs = SpikeData(
-            [[0, 20, 40], [10, 30], [5, 25], [15, 35]],
-            length=50,
-            neuron_attributes=attrs,
-        )
-        channel_raster_attr = sd_with_attrs.channel_raster("channel_id", bin_size=10)
-        self.assertAll(channel_raster_attr == channel_raster)
-
-        # Test error cases
-        with self.assertRaises(ValueError):
-            sd.channel_raster([0, 1], bin_size=10)  # Wrong length
-
-        with self.assertRaises(ValueError):
-            sd.channel_raster("channel_id", bin_size=10)  # No neuron_attributes
-
-    def test_frame_channel_raster(self):
-        # Test combining frame-level binning with channel aggregation
         sd = SpikeData(
-            [[0, 33.33, 66.67], [16.67, 50], [8.33, 41.67]], length=100
+            [[0, 33.33, 66.67], [16.67, 50], [8.33, 41.67]],
+            length=100,
+            neuron_attributes=attrs,
         )  # 3 neurons
-
-        # Map neurons 0,1 to channel 0; neuron 2 to channel 1
-        channel_map = [0, 0, 1]
 
         # At 30 fps, should get frame-level channel raster
         # Bin size = 1000/30 = 33.33 ms, length=100, so ceil(100/33.33) = 3 bins
-        frame_channel_raster = sd.frame_channel_raster(channel_map, frame_rate_hz=30.0)
+        frame_channel_raster = sd.frame_channel_raster(frame_rate_hz=30.0)
         self.assertEqual(frame_channel_raster.shape[0], 2)  # 2 channels
         self.assertEqual(frame_channel_raster.shape[1], 3)  # 3 frames at 30 fps
 
@@ -772,14 +771,12 @@ class SpikeDataTest(unittest.TestCase):
         self.assertGreater(frame_channel_raster[1].sum(), 0)
 
         # Test binary mode
-        frame_channel_binary = sd.frame_channel_raster(
-            channel_map, frame_rate_hz=30.0, binary=True
-        )
+        frame_channel_binary = sd.frame_channel_raster(frame_rate_hz=30.0, binary=True)
         self.assertAll((frame_channel_binary == 0) | (frame_channel_binary == 1))
 
         # Test sparse version
         sparse_frame_channel = sd.frame_channel_raster(
-            channel_map, frame_rate_hz=30.0, sparse_output=True
+            frame_rate_hz=30.0, sparse_output=True
         )
         self.assertTrue(sparse.issparse(sparse_frame_channel))
         self.assertAll(sparse_frame_channel.toarray() == frame_channel_raster)
@@ -787,11 +784,19 @@ class SpikeDataTest(unittest.TestCase):
     def test_channel_raster_aggregation(self):
         # Test that multiple neurons on the same channel properly aggregate
         # Create data where multiple neurons spike in the same bin
-        sd = SpikeData([[0, 10], [5, 15], [8, 18]], length=20)
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(0),
+            ChannelAttributes(0),
+        ]
+        sd = SpikeData([[0, 10], [5, 15], [8, 18]], length=20, neuron_attributes=attrs)
 
         # All neurons map to channel 0
-        channel_map = [0, 0, 0]
-        channel_raster = sd.channel_raster(channel_map, bin_size=10)
+        channel_raster = sd.channel_raster(bin_size=10)
 
         self.assertEqual(channel_raster.shape[0], 1)  # 1 channel
         self.assertEqual(channel_raster.shape[1], 2)  # 2 bins
@@ -803,6 +808,79 @@ class SpikeDataTest(unittest.TestCase):
         self.assertEqual(channel_raster[0, 1], 2)
 
         # Test binary mode - should still be 1 even with multiple spikes
-        channel_raster_binary = sd.channel_raster(channel_map, bin_size=10, binary=True)
+        channel_raster_binary = sd.channel_raster(bin_size=10, binary=True)
         self.assertEqual(channel_raster_binary[0, 0], 1)
         self.assertEqual(channel_raster_binary[0, 1], 1)
+
+    def test_get_channel_map(self):
+        # Test auto-detection from neuron_attributes
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(0),
+            ChannelAttributes(1),
+            ChannelAttributes(1),
+        ]
+        sd = SpikeData(
+            [[0, 20], [10, 30], [5, 25], [15, 35]],
+            length=50,
+            neuron_attributes=attrs,
+        )
+
+        # Auto-detect using common attribute name
+        channel_map = sd.get_channel_map()
+        self.assertIsNotNone(channel_map)
+        self.assertAll(channel_map == [0, 0, 1, 1])
+
+        # Test with custom attribute name
+        @dataclass
+        class CustomAttributes:
+            electrode_id: int
+
+        attrs_custom = [
+            CustomAttributes(2),
+            CustomAttributes(2),
+            CustomAttributes(3),
+        ]
+        sd_custom = SpikeData(
+            [[0], [10], [5]], length=50, neuron_attributes=attrs_custom
+        )
+        channel_map_custom = sd_custom.get_channel_map(attribute_name="electrode_id")
+        self.assertIsNotNone(channel_map_custom)
+        self.assertAll(channel_map_custom == [2, 2, 3])
+
+        # Test with raw_data
+        raw_data = np.random.rand(2, 100)  # 2 channels, 100 time points
+        sd_raw = SpikeData(
+            [[0, 20], [10, 30]],
+            length=50,
+            raw_data=raw_data,
+            raw_time=np.arange(100) / 2.0,
+        )
+        channel_map_raw = sd_raw.get_channel_map(from_raw_data=True)
+        self.assertIsNotNone(channel_map_raw)
+        self.assertAll(channel_map_raw == [0, 1])  # Each neuron = one channel
+
+        # Test with metadata
+        sd_meta = SpikeData(
+            [[0, 20], [10, 30]], length=50, metadata={"channel_map": [0, 1]}
+        )
+        channel_map_meta = sd_meta.get_channel_map()
+        self.assertIsNotNone(channel_map_meta)
+        self.assertAll(channel_map_meta == [0, 1])
+
+        # Test when no mapping can be determined
+        sd_no_map = SpikeData([[0, 20], [10, 30]], length=50)
+        channel_map_none = sd_no_map.get_channel_map()
+        self.assertIsNone(channel_map_none)
+
+        # Test that channel_raster automatically uses get_channel_map
+        channel_raster_auto = sd.channel_raster(bin_size=10)
+        self.assertEqual(channel_raster_auto.shape[0], 2)  # 2 channels
+
+        # Test that it raises error when no mapping available
+        with self.assertRaises(ValueError):
+            sd_no_map.channel_raster(bin_size=10)

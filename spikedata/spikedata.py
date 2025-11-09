@@ -568,7 +568,12 @@ class SpikeData:
         return self.sparse_raster(bin_size_ms)
 
     def channel_raster(
-        self, channel_map, bin_size=20.0, sparse_output=False, binary=False
+        self,
+        bin_size=20.0,
+        sparse_output=False,
+        binary=False,
+        attribute_name=None,
+        from_raw_data=False,
     ):
         """
         Create a raster organized by channels instead of individual neurons.
@@ -578,13 +583,12 @@ class SpikeData:
         from the same physical channel or when you want to analyze activity at the
         channel level rather than the neuron level.
 
+        The channel mapping is automatically derived using get_channel_map(), which
+        attempts to find channel information from neuron_attributes, raw_data shape,
+        or metadata.
+
         Parameters
         ----------
-        channel_map : array-like, dict, or str
-            Mapping from neuron indices to channel indices. Can be:
-            - Array-like of length N: channel_map[i] is the channel index for neuron i
-            - Dict: channel_map[i] is the channel index for neuron i
-            - String: name of attribute in neuron_attributes (e.g., 'channel_id')
         bin_size : float, default=20.0
             Bin size in milliseconds for the raster.
         sparse_output : bool, default=False
@@ -592,6 +596,13 @@ class SpikeData:
         binary : bool, default=False
             If True, return a binary mask (0/1) indicating presence of any spike.
             If False, return spike counts per channel per bin.
+        attribute_name : str, optional
+            Name of the attribute in neuron_attributes that contains channel information.
+            If None, will try common names: 'channel_id', 'channel', 'ch', 'channel_idx'.
+            Passed to get_channel_map().
+        from_raw_data : bool, default=False
+            If True and raw_data is available, derive mapping from raw_data shape.
+            Passed to get_channel_map().
 
         Returns
         -------
@@ -600,23 +611,32 @@ class SpikeData:
             number of time bins. Entry (c, t) indicates spike activity for channel c
             in time bin t (either count or binary mask depending on `binary` parameter).
 
+        Raises
+        ------
+        ValueError
+            If no channel mapping can be automatically determined from the available data.
+
         Examples
         --------
-        >>> # Map neurons 0,1,2 to channel 0, neuron 3 to channel 1
-        >>> channel_map = [0, 0, 0, 1]
-        >>> channel_raster = sd.channel_raster(channel_map, bin_size=10)
+        >>> # Auto-detect channel mapping from neuron_attributes
+        >>> channel_raster = sd.channel_raster(bin_size=10)
+        >>>
+        >>> # Specify custom attribute name
+        >>> channel_raster = sd.channel_raster(bin_size=10, attribute_name='electrode_id')
+        >>>
+        >>> # Derive from raw_data shape
+        >>> channel_raster = sd.channel_raster(bin_size=10, from_raw_data=True)
         """
-        # Resolve channel mapping
-        if isinstance(channel_map, str):
-            if self.neuron_attributes is None:
-                raise ValueError(
-                    f"Cannot use channel_map='{channel_map}' without neuron_attributes"
-                )
-            channel_map = [
-                getattr(attr, channel_map) for attr in self.neuron_attributes
-            ]
-        elif isinstance(channel_map, dict):
-            channel_map = [channel_map.get(i, -1) for i in range(self.N)]
+        # Automatically derive channel mapping
+        channel_map = self.get_channel_map(
+            attribute_name=attribute_name, from_raw_data=from_raw_data
+        )
+        if channel_map is None:
+            raise ValueError(
+                "Could not automatically derive channel mapping. "
+                "Ensure neuron_attributes contains channel information (e.g., 'channel_id'), "
+                "or provide raw_data with from_raw_data=True, or store 'channel_map' in metadata."
+            )
 
         channel_map = np.asarray(channel_map)
         if len(channel_map) != self.N:
@@ -688,7 +708,9 @@ class SpikeData:
         else:
             return channel_raster
 
-    def sparse_channel_raster(self, channel_map, bin_size=20.0, binary=False):
+    def sparse_channel_raster(
+        self, bin_size=20.0, binary=False, attribute_name=None, from_raw_data=False
+    ):
         """
         Create a sparse raster organized by channels instead of individual neurons.
 
@@ -696,11 +718,20 @@ class SpikeData:
         See channel_raster() for detailed documentation.
         """
         return self.channel_raster(
-            channel_map, bin_size, sparse_output=True, binary=binary
+            bin_size,
+            sparse_output=True,
+            binary=binary,
+            attribute_name=attribute_name,
+            from_raw_data=from_raw_data,
         )
 
     def frame_channel_raster(
-        self, channel_map, frame_rate_hz=30.0, sparse_output=False, binary=False
+        self,
+        frame_rate_hz=30.0,
+        sparse_output=False,
+        binary=False,
+        attribute_name=None,
+        from_raw_data=False,
     ):
         """
         Create a frame-level raster organized by channels.
@@ -708,16 +739,22 @@ class SpikeData:
         Combines frame-level binning with channel aggregation. Useful for aligning
         channel-level spike activity with video frames or other frame-based data.
 
+        The channel mapping is automatically derived using get_channel_map().
+
         Parameters
         ----------
-        channel_map : array-like, dict, or str
-            Mapping from neuron indices to channel indices. See channel_raster() for details.
         frame_rate_hz : float, default=30.0
             Frame rate in Hz (frames per second).
         sparse_output : bool, default=False
             If True, return a sparse array.
         binary : bool, default=False
             If True, return a binary mask (0/1) indicating presence of any spike.
+        attribute_name : str, optional
+            Name of the attribute in neuron_attributes that contains channel information.
+            Passed to get_channel_map().
+        from_raw_data : bool, default=False
+            If True and raw_data is available, derive mapping from raw_data shape.
+            Passed to get_channel_map().
 
         Returns
         -------
@@ -725,9 +762,121 @@ class SpikeData:
             Array of shape (C, F) where C is the number of channels and F is the
             number of frames. Entry (c, f) indicates spike activity for channel c
             in frame f.
+
+        Raises
+        ------
+        ValueError
+            If no channel mapping can be automatically determined from the available data.
         """
         bin_size_ms = 1000.0 / frame_rate_hz
-        return self.channel_raster(channel_map, bin_size_ms, sparse_output, binary)
+        return self.channel_raster(
+            bin_size_ms,
+            sparse_output,
+            binary,
+            attribute_name=attribute_name,
+            from_raw_data=from_raw_data,
+        )
+
+    def get_channel_map(self, attribute_name=None, from_raw_data=False):
+        """
+        Derive or extract the channel-to-neuron mapping from available data.
+
+        This method attempts to automatically determine the channel mapping using
+        multiple strategies:
+        1. From neuron_attributes if an attribute name is provided or common names exist
+        2. From raw_data shape if it has channel structure
+        3. Returns None if no mapping can be determined
+
+        Parameters
+        ----------
+        attribute_name : str, optional
+            Name of the attribute in neuron_attributes that contains channel information.
+            If None, will try common names: 'channel_id', 'channel', 'ch', 'channel_idx'.
+        from_raw_data : bool, default=False
+            If True and raw_data is available, derive mapping from raw_data shape.
+            Assumes raw_data has shape (channels, time) and neurons correspond to channels.
+
+        Returns
+        -------
+        numpy.ndarray or None
+            Array of length N where entry i is the channel index for neuron i.
+            Returns None if no mapping can be determined.
+
+        Examples
+        --------
+        >>> # Auto-detect from neuron_attributes with common attribute names
+        >>> channel_map = sd.get_channel_map()
+        >>>
+        >>> # Specify custom attribute name
+        >>> channel_map = sd.get_channel_map(attribute_name='electrode_id')
+        >>>
+        >>> # Derive from raw_data shape
+        >>> channel_map = sd.get_channel_map(from_raw_data=True)
+        """
+        # Strategy 1: Try neuron_attributes
+        if self.neuron_attributes is not None:
+            # Try provided attribute name or common names
+            candidates = []
+            if attribute_name:
+                candidates.append(attribute_name)
+            else:
+                candidates = [
+                    "channel_id",
+                    "channel",
+                    "ch",
+                    "channel_idx",
+                    "electrode_id",
+                    "electrode",
+                ]
+
+            for attr_name in candidates:
+                try:
+                    channel_map = [
+                        getattr(attr, attr_name) for attr in self.neuron_attributes
+                    ]
+                    # Check if all values are valid (not None, numeric)
+                    if all(
+                        v is not None
+                        and isinstance(v, (int, float, np.integer, np.floating))
+                        for v in channel_map
+                    ):
+                        return np.asarray(channel_map)
+                except AttributeError:
+                    continue
+
+        # Strategy 2: Derive from raw_data shape
+        if from_raw_data and hasattr(self, "raw_data") and self.raw_data.size > 0:
+            raw_shape = self.raw_data.shape
+            # If raw_data has shape (channels, time) or (channels, ...),
+            # and number of channels matches number of neurons
+            if len(raw_shape) >= 2:
+                n_channels = raw_shape[0]
+                if n_channels == self.N:
+                    # Each neuron corresponds to one channel
+                    return np.arange(n_channels)
+                elif n_channels < self.N:
+                    # Multiple neurons per channel - need to map them
+                    # This is a heuristic: assume neurons are grouped sequentially
+                    neurons_per_channel = self.N // n_channels
+                    channel_map = []
+                    for ch in range(n_channels):
+                        channel_map.extend([ch] * neurons_per_channel)
+                    # Handle remainder
+                    remainder = self.N % n_channels
+                    if remainder > 0:
+                        channel_map.extend([n_channels - 1] * remainder)
+                    return np.asarray(channel_map)
+
+        # Strategy 3: Check metadata
+        if hasattr(self, "metadata") and isinstance(self.metadata, dict):
+            if "channel_map" in self.metadata:
+                channel_map = self.metadata["channel_map"]
+                if isinstance(channel_map, (list, np.ndarray)):
+                    channel_map = np.asarray(channel_map)
+                    if len(channel_map) == self.N:
+                        return channel_map
+
+        return None
 
     def interspike_intervals(self):
         "Produce a list of arrays of interspike intervals per unit."
