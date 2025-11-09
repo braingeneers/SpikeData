@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Union
 
 import numpy as np
 from numpy.typing import NDArray
@@ -191,7 +191,7 @@ class SpikeData:
         data: NDArray,
         fs_Hz=20e3,
         threshold_sigma=5.0,
-        filter: dict | bool = True,
+        filter: Union[dict, bool] = True,
         hysteresis=True,
         direction: Literal["both", "up", "down"] = "both",
     ):
@@ -234,7 +234,7 @@ class SpikeData:
         neuron_attributes=None,
         metadata={},
         raw_data=None,
-        raw_time: NDArray | float | None = None,
+        raw_time: Union[NDArray, float, None] = None,
     ):
         """
         Initialize a SpikeData object using a list of spike trains, each a
@@ -524,6 +524,211 @@ class SpikeData:
         """
         return self.sparse_raster(bin_size).toarray()
 
+    def frame_raster(self, frame_rate_hz=30.0):
+        """
+        Bin all spike times at a specific frame rate to create a frame-level raster.
+
+        This is useful for aligning spike data with video frame rates or other
+        frame-based data sources. The bin size is automatically calculated from the
+        frame rate (bin_size = 1000 / frame_rate_hz ms).
+
+        Parameters
+        ----------
+        frame_rate_hz : float, default=30.0
+            Frame rate in Hz (frames per second). The bin size will be 1000/frame_rate_hz ms.
+
+        Returns
+        -------
+        numpy.ndarray
+            Dense array of shape (N, T) where N is the number of neurons and T is the
+            number of frames. Entry (i, j) is the number of times neuron i fired in frame j.
+        """
+        bin_size_ms = 1000.0 / frame_rate_hz
+        return self.raster(bin_size_ms)
+
+    def sparse_frame_raster(self, frame_rate_hz=30.0):
+        """
+        Bin all spike times at a specific frame rate to create a sparse frame-level raster.
+
+        This is useful for aligning spike data with video frame rates or other
+        frame-based data sources when memory efficiency is important.
+
+        Parameters
+        ----------
+        frame_rate_hz : float, default=30.0
+            Frame rate in Hz (frames per second). The bin size will be 1000/frame_rate_hz ms.
+
+        Returns
+        -------
+        scipy.sparse.csr_array
+            Sparse array of shape (N, T) where N is the number of neurons and T is the
+            number of frames. Entry (i, j) is the number of times neuron i fired in frame j.
+        """
+        bin_size_ms = 1000.0 / frame_rate_hz
+        return self.sparse_raster(bin_size_ms)
+
+    def channel_raster(
+        self, channel_map, bin_size=20.0, sparse_output=False, binary=False
+    ):
+        """
+        Create a raster organized by channels instead of individual neurons.
+
+        Aggregates spikes from multiple neurons that belong to the same channel into
+        a single channel-level representation. This is useful when neurons are recorded
+        from the same physical channel or when you want to analyze activity at the
+        channel level rather than the neuron level.
+
+        Parameters
+        ----------
+        channel_map : array-like, dict, or str
+            Mapping from neuron indices to channel indices. Can be:
+            - Array-like of length N: channel_map[i] is the channel index for neuron i
+            - Dict: channel_map[i] is the channel index for neuron i
+            - String: name of attribute in neuron_attributes (e.g., 'channel_id')
+        bin_size : float, default=20.0
+            Bin size in milliseconds for the raster.
+        sparse_output : bool, default=False
+            If True, return a sparse array. If False, return a dense array.
+        binary : bool, default=False
+            If True, return a binary mask (0/1) indicating presence of any spike.
+            If False, return spike counts per channel per bin.
+
+        Returns
+        -------
+        numpy.ndarray or scipy.sparse.csr_array
+            Array of shape (C, T) where C is the number of channels and T is the
+            number of time bins. Entry (c, t) indicates spike activity for channel c
+            in time bin t (either count or binary mask depending on `binary` parameter).
+
+        Examples
+        --------
+        >>> # Map neurons 0,1,2 to channel 0, neuron 3 to channel 1
+        >>> channel_map = [0, 0, 0, 1]
+        >>> channel_raster = sd.channel_raster(channel_map, bin_size=10)
+        """
+        # Resolve channel mapping
+        if isinstance(channel_map, str):
+            if self.neuron_attributes is None:
+                raise ValueError(
+                    f"Cannot use channel_map='{channel_map}' without neuron_attributes"
+                )
+            channel_map = [
+                getattr(attr, channel_map) for attr in self.neuron_attributes
+            ]
+        elif isinstance(channel_map, dict):
+            channel_map = [channel_map.get(i, -1) for i in range(self.N)]
+
+        channel_map = np.asarray(channel_map)
+        if len(channel_map) != self.N:
+            raise ValueError(
+                f"channel_map length ({len(channel_map)}) must match number of neurons ({self.N})"
+            )
+
+        # Get unique channels and create mapping
+        unique_channels = np.unique(channel_map)
+        unique_channels = unique_channels[unique_channels >= 0]  # Remove -1 if present
+        n_channels = len(unique_channels)
+        channel_to_idx = {ch: idx for idx, ch in enumerate(unique_channels)}
+
+        # Get neuron-level raster
+        neuron_raster = self.sparse_raster(bin_size)
+
+        # Aggregate by channel
+        if sparse.issparse(neuron_raster):
+            # Convert to COO format for easier manipulation
+            neuron_raster_coo = neuron_raster.tocoo()
+            # Map neuron indices to channel indices
+            channel_indices = np.array(
+                [
+                    channel_to_idx.get(channel_map[neuron_idx], -1)
+                    for neuron_idx in neuron_raster_coo.row
+                ]
+            )
+            # Filter out invalid channels
+            valid_mask = channel_indices >= 0
+            channel_indices = channel_indices[valid_mask]
+            time_indices = neuron_raster_coo.col[valid_mask]
+            values = neuron_raster_coo.data[valid_mask]
+
+            # Aggregate spikes for the same (channel, time) pair
+            n_bins = neuron_raster.shape[1]
+            if binary:
+                # Binary mask: just mark presence
+                # Use a temporary dense array to aggregate, then convert to sparse
+                temp_dense = np.zeros((n_channels, n_bins), dtype=int)
+                for ch_idx, t_idx in zip(channel_indices, time_indices):
+                    temp_dense[ch_idx, t_idx] = 1
+                channel_raster = sparse.csr_array(temp_dense)
+            else:
+                # Count spikes - need to sum values for same (channel, time) pairs
+                # Use a temporary dense array to aggregate properly
+                temp_dense = np.zeros((n_channels, n_bins), dtype=float)
+                for ch_idx, t_idx, val in zip(channel_indices, time_indices, values):
+                    temp_dense[ch_idx, t_idx] += val
+                channel_raster = sparse.csr_array(temp_dense)
+        else:
+            # Dense case
+            n_bins = neuron_raster.shape[1]
+            channel_raster = np.zeros((n_channels, n_bins), dtype=int)
+            for neuron_idx in range(self.N):
+                channel_idx = channel_to_idx.get(channel_map[neuron_idx], -1)
+                if channel_idx >= 0:
+                    if binary:
+                        channel_raster[channel_idx] = (
+                            channel_raster[channel_idx]
+                            | (neuron_raster[neuron_idx] > 0)
+                        ).astype(int)
+                    else:
+                        channel_raster[channel_idx] += neuron_raster[neuron_idx]
+
+        if not sparse_output and sparse.issparse(channel_raster):
+            return channel_raster.toarray()
+        elif sparse_output and not sparse.issparse(channel_raster):
+            return sparse.csr_array(channel_raster)
+        else:
+            return channel_raster
+
+    def sparse_channel_raster(self, channel_map, bin_size=20.0, binary=False):
+        """
+        Create a sparse raster organized by channels instead of individual neurons.
+
+        This is a convenience method that calls channel_raster with sparse_output=True.
+        See channel_raster() for detailed documentation.
+        """
+        return self.channel_raster(
+            channel_map, bin_size, sparse_output=True, binary=binary
+        )
+
+    def frame_channel_raster(
+        self, channel_map, frame_rate_hz=30.0, sparse_output=False, binary=False
+    ):
+        """
+        Create a frame-level raster organized by channels.
+
+        Combines frame-level binning with channel aggregation. Useful for aligning
+        channel-level spike activity with video frames or other frame-based data.
+
+        Parameters
+        ----------
+        channel_map : array-like, dict, or str
+            Mapping from neuron indices to channel indices. See channel_raster() for details.
+        frame_rate_hz : float, default=30.0
+            Frame rate in Hz (frames per second).
+        sparse_output : bool, default=False
+            If True, return a sparse array.
+        binary : bool, default=False
+            If True, return a binary mask (0/1) indicating presence of any spike.
+
+        Returns
+        -------
+        numpy.ndarray or scipy.sparse.csr_array
+            Array of shape (C, F) where C is the number of channels and F is the
+            number of frames. Entry (c, f) indicates spike activity for channel c
+            in frame f.
+        """
+        bin_size_ms = 1000.0 / frame_rate_hz
+        return self.channel_raster(channel_map, bin_size_ms, sparse_output, binary)
+
     def interspike_intervals(self):
         "Produce a list of arrays of interspike intervals per unit."
         return [np.diff(ts) for ts in self.train]
@@ -799,7 +1004,7 @@ class SpikeData:
 
 
 def population_firing_rate(
-    trains: list[NDArray] | NDArray,
+    trains: Union[list[NDArray], NDArray],
     rec_length=None,
     bin_size=10,
     w=5,
@@ -836,7 +1041,7 @@ def population_firing_rate(
     return bins, fr_pop
 
 
-def spike_time_tiling(tA, tB, delt=20.0, length: float | None = None):
+def spike_time_tiling(tA, tB, delt=20.0, length: Union[float, None] = None):
     """
     Calculate the spike time tiling coefficient [1] between two spike trains. STTC is a
     metric for correlation between spike trains with some improved intuitive properties
@@ -870,7 +1075,7 @@ def _spike_time_tiling(tA, tB, TA, TB, delt):
     return (aa + bb) / 2
 
 
-def best_effort_sample(counts, M, rng: np.random.Generator | None = None):
+def best_effort_sample(counts, M, rng: Union[np.random.Generator, None] = None):
     """
     Given a discrete distribution over the integers 0...N-1 in the form of an array of N
     counts, sample M elements from the distribution without replacement if possible. If
@@ -893,7 +1098,7 @@ def best_effort_sample(counts, M, rng: np.random.Generator | None = None):
         return ret
 
 
-def randomize_raster(raster, seed: int | None = None, method="poprate_greedy"):
+def randomize_raster(raster, seed: Union[int, None] = None, method="poprate_greedy"):
     """
     Generate a randomized version of a spike raster by reassigning all its spike times
     to new bins, while preserving the total number of spikes for each unit.
@@ -926,7 +1131,7 @@ def _okun_swap(ar, idxs, rng):
     return True
 
 
-def randomize_raster_okun(raster, seed: int | None = None, swap_per_spike=5):
+def randomize_raster_okun(raster, seed: Union[int, None] = None, swap_per_spike=5):
     """
     Generate a randomized version of a spike raster, preserving population rate. The
     input raster MUST have at most one spike per neuron per bin!
@@ -958,7 +1163,7 @@ def randomize_raster_okun(raster, seed: int | None = None, swap_per_spike=5):
     return raster
 
 
-def randomize_raster_greedy(raster, seed: int | None = None):
+def randomize_raster_greedy(raster, seed: Union[int, None] = None):
     """
     Generate a randomized version of a spike raster, preserving population rate.
 
@@ -1212,8 +1417,8 @@ def burst_detection(spike_times, burst_threshold, spike_num_thr=3):
 
 def butter_filter(
     data,
-    lowcut: float | None = None,
-    highcut: float | None = None,
+    lowcut: Union[float, None] = None,
+    highcut: Union[float, None] = None,
     fs=20000.0,
     order=5,
 ):
@@ -1234,23 +1439,22 @@ def butter_filter(
     Returns:
         The filtered output with the same shape as data
     """
-    match (lowcut, highcut):
-        case None, None:
-            raise ValueError(
-                "Need at least a low cutoff (lowcut) or high cutoff (highcut) frequency!"
-            )
-        case None, _:
-            filter_type = "lowpass"
-            Wn = highcut / fs * 2
-        case _, None:
-            filter_type = "highpass"
-            Wn = lowcut / fs * 2
-        case _, _:
-            if lowcut >= highcut:
-                raise ValueError("lowcut must be smaller than highcut")
-            filter_type = "bandpass"
-            band = [lowcut, highcut]
-            Wn = [e / fs * 2 for e in band]
+    if lowcut is None and highcut is None:
+        raise ValueError(
+            "Need at least a low cutoff (lowcut) or high cutoff (highcut) frequency!"
+        )
+    elif lowcut is None:
+        filter_type = "lowpass"
+        Wn = highcut / fs * 2
+    elif highcut is None:
+        filter_type = "highpass"
+        Wn = lowcut / fs * 2
+    else:
+        if lowcut >= highcut:
+            raise ValueError("lowcut must be smaller than highcut")
+        filter_type = "bandpass"
+        band = [lowcut, highcut]
+        Wn = [e / fs * 2 for e in band]
 
     filter_coeff = signal.iirfilter(
         order, Wn, analog=False, btype=filter_type, output="sos"
