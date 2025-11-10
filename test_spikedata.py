@@ -884,3 +884,313 @@ class SpikeDataTest(unittest.TestCase):
         # Test that it raises error when no mapping available
         with self.assertRaises(ValueError):
             sd_no_map.channel_raster(bin_size=10)
+
+    def test_expected_num_channels_padding(self):
+        """Test expected_num_channels parameter with padding (fewer channels -> more channels)"""
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        # Create data with 3 neurons mapping to 2 channels
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(0),
+            ChannelAttributes(1),
+        ]
+        sd = SpikeData(
+            [[0, 10], [5, 15], [8, 18]], length=20, neuron_attributes=attrs
+        )
+
+        # Request 5 channels (padding needed)
+        channel_raster = sd.channel_raster(
+            bin_size=10, expected_num_channels=5
+        )
+        self.assertEqual(channel_raster.shape[0], 5)  # Should be padded to 5 channels
+        self.assertEqual(channel_raster.shape[1], 2)  # 2 bins
+
+        # First 2 channels should have data, last 3 should be zeros
+        self.assertGreater(channel_raster[0].sum(), 0)
+        self.assertGreater(channel_raster[1].sum(), 0)
+        self.assertAll(channel_raster[2:] == 0)  # Padded channels should be zero
+
+    def test_expected_num_channels_trimming(self):
+        """Test expected_num_channels parameter with trimming (more channels -> fewer channels)"""
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        # Create data with 5 neurons mapping to 5 channels
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(1),
+            ChannelAttributes(2),
+            ChannelAttributes(3),
+            ChannelAttributes(4),
+        ]
+        sd = SpikeData(
+            [[0], [5], [10], [15], [20]], length=25, neuron_attributes=attrs
+        )
+
+        # Request 3 channels (trimming needed)
+        channel_raster = sd.channel_raster(
+            bin_size=10, expected_num_channels=3
+        )
+        self.assertEqual(channel_raster.shape[0], 3)  # Should be trimmed to 3 channels
+        self.assertEqual(channel_raster.shape[1], 3)  # 3 bins
+
+        # Should only have data from first 3 channels
+        self.assertGreater(channel_raster[0].sum(), 0)
+        self.assertGreater(channel_raster[1].sum(), 0)
+        self.assertGreater(channel_raster[2].sum(), 0)
+
+    def test_expected_num_channels_exact_match(self):
+        """Test expected_num_channels when it matches the actual number of channels"""
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(1),
+            ChannelAttributes(2),
+        ]
+        sd = SpikeData(
+            [[0], [5], [10]], length=15, neuron_attributes=attrs
+        )
+
+        # Request exactly 3 channels (no padding/trimming needed)
+        channel_raster = sd.channel_raster(
+            bin_size=10, expected_num_channels=3
+        )
+        self.assertEqual(channel_raster.shape[0], 3)
+        # Should be identical to without expected_num_channels
+        channel_raster_no_param = sd.channel_raster(bin_size=10)
+        self.assertAll(channel_raster == channel_raster_no_param)
+
+    def test_large_channel_count_sparse(self):
+        """Test with large channel counts (like Maxwell 26.4k channels) using sparse operations"""
+        # Simulate a large number of channels (use smaller number for testing but test the logic)
+        num_channels = 1000  # Use 1000 for testing, but logic should scale to 26.4k
+        num_neurons = 100  # Fewer neurons than channels
+
+        # Create channel map: map neurons to first few channels
+        channel_map = np.arange(num_neurons) % (num_channels // 10)
+        metadata = {"channel_map": channel_map.tolist()}
+
+        # Create spike data with neurons
+        train = [[i * 10 + j * 0.1 for j in range(5)] for i in range(num_neurons)]
+        sd = SpikeData(train, length=1000, metadata=metadata)
+
+        # Test sparse channel raster with large expected_num_channels
+        # This should use sparse operations and be memory efficient
+        channel_raster_sparse = sd.channel_raster(
+            bin_size=10,
+            sparse_output=True,
+            expected_num_channels=num_channels,
+        )
+        self.assertTrue(sparse.issparse(channel_raster_sparse))
+        self.assertEqual(channel_raster_sparse.shape[0], num_channels)
+        # Should have data in first few channels, zeros in rest
+        self.assertGreater(channel_raster_sparse[: num_channels // 10].sum(), 0)
+        # Rest should be zeros (sparse, so sum should be efficient)
+        self.assertEqual(channel_raster_sparse[num_channels // 10 :].sum(), 0)
+
+    def test_large_channel_count_dense(self):
+        """Test with large channel counts using dense output"""
+        num_channels = 500  # Use smaller number for dense testing
+        num_neurons = 50
+
+        channel_map = np.arange(num_neurons) % (num_channels // 5)
+        metadata = {"channel_map": channel_map.tolist()}
+
+        train = [[i * 10 + j * 0.1 for j in range(3)] for i in range(num_neurons)]
+        sd = SpikeData(train, length=600, metadata=metadata)
+
+        # Test dense channel raster with large expected_num_channels
+        channel_raster_dense = sd.channel_raster(
+            bin_size=10,
+            sparse_output=False,
+            expected_num_channels=num_channels,
+        )
+        self.assertFalse(sparse.issparse(channel_raster_dense))
+        self.assertEqual(channel_raster_dense.shape[0], num_channels)
+        # First channels should have data
+        self.assertGreater(channel_raster_dense[: num_channels // 5].sum(), 0)
+        # Padded channels should be zeros
+        self.assertAll(channel_raster_dense[num_channels // 5 :] == 0)
+
+    def test_frame_channel_raster_expected_num_channels(self):
+        """Test frame_channel_raster with expected_num_channels parameter"""
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(1),
+        ]
+        sd = SpikeData(
+            [[0, 33.33], [16.67, 50]], length=100, neuron_attributes=attrs
+        )
+
+        # Request 5 channels (padding needed)
+        frame_raster = sd.frame_channel_raster(
+            frame_rate_hz=30.0, expected_num_channels=5
+        )
+        self.assertEqual(frame_raster.shape[0], 5)
+        self.assertEqual(frame_raster.shape[1], 3)  # 3 frames at 30 fps
+
+        # First 2 channels should have data, last 3 should be zeros
+        self.assertGreater(frame_raster[0].sum(), 0)
+        self.assertGreater(frame_raster[1].sum(), 0)
+        self.assertAll(frame_raster[2:] == 0)
+
+    def test_expected_num_channels_binary_mode(self):
+        """Test expected_num_channels with binary mode"""
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(1),
+        ]
+        sd = SpikeData(
+            [[0, 10, 20], [5, 15]], length=25, neuron_attributes=attrs
+        )
+
+        # Test binary mode with padding
+        channel_raster_binary = sd.channel_raster(
+            bin_size=10, binary=True, expected_num_channels=5
+        )
+        self.assertEqual(channel_raster_binary.shape[0], 5)
+        # Binary mode: values should only be 0 or 1
+        self.assertAll((channel_raster_binary == 0) | (channel_raster_binary == 1))
+        # Padded channels should be zeros
+        self.assertAll(channel_raster_binary[2:] == 0)
+
+    def test_expected_num_channels_sparse_channel_raster(self):
+        """Test sparse_channel_raster with expected_num_channels"""
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(1),
+        ]
+        sd = SpikeData(
+            [[0, 10], [5, 15]], length=20, neuron_attributes=attrs
+        )
+
+        # Test sparse version with padding
+        sparse_raster = sd.sparse_channel_raster(
+            bin_size=10, expected_num_channels=5
+        )
+        self.assertTrue(sparse.issparse(sparse_raster))
+        self.assertEqual(sparse_raster.shape[0], 5)
+        # Convert to dense to check padding
+        dense_raster = sparse_raster.toarray()
+        self.assertAll(dense_raster[2:] == 0)
+
+    def test_expected_num_channels_zero_padding(self):
+        """Test that padding with zeros works correctly"""
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        attrs = [ChannelAttributes(0)]
+        sd = SpikeData([[0, 10, 20]], length=30, neuron_attributes=attrs)
+
+        # Request 10 channels (1 real + 9 padded)
+        channel_raster = sd.channel_raster(
+            bin_size=10, expected_num_channels=10
+        )
+        self.assertEqual(channel_raster.shape[0], 10)
+        # First channel should have spikes
+        self.assertGreater(channel_raster[0].sum(), 0)
+        # All other channels should be zeros
+        self.assertAll(channel_raster[1:] == 0)
+
+    def test_expected_num_channels_metadata_priority(self):
+        """Test that metadata channel_map is used correctly with expected_num_channels"""
+        # Create spike data with metadata channel_map
+        metadata = {"channel_map": [0, 0, 1, 1, 2, 2]}  # 6 neurons -> 3 channels
+        train = [[i * 10] for i in range(6)]
+        sd = SpikeData(train, length=60, metadata=metadata)
+
+        # Request 5 channels (3 real + 2 padded)
+        channel_raster = sd.channel_raster(
+            bin_size=10, expected_num_channels=5
+        )
+        self.assertEqual(channel_raster.shape[0], 5)
+        # First 3 channels should have data
+        self.assertGreater(channel_raster[:3].sum(), 0)
+        # Last 2 should be zeros
+        self.assertAll(channel_raster[3:] == 0)
+
+    def test_expected_num_channels_edge_cases(self):
+        """Test edge cases for expected_num_channels"""
+        @dataclass
+        class ChannelAttributes:
+            channel_id: int
+
+        attrs = [
+            ChannelAttributes(0),
+            ChannelAttributes(1),
+        ]
+        sd = SpikeData(
+            [[0, 10], [5, 15]], length=20, neuron_attributes=attrs
+        )
+
+        # Test with expected_num_channels=1 (trimming to single channel)
+        channel_raster_1 = sd.channel_raster(
+            bin_size=10, expected_num_channels=1
+        )
+        self.assertEqual(channel_raster_1.shape[0], 1)
+
+        # Test with expected_num_channels=None (should work normally)
+        channel_raster_none = sd.channel_raster(
+            bin_size=10, expected_num_channels=None
+        )
+        channel_raster_default = sd.channel_raster(bin_size=10)
+        self.assertAll(channel_raster_none == channel_raster_default)
+
+    def test_large_channel_count_memory_efficiency(self):
+        """Test that large channel counts use sparse operations efficiently"""
+        # Simulate Maxwell-like scenario: many neurons but fewer unique channels
+        num_neurons = 1000
+        num_unique_channels = 100
+        num_expected_channels = 26400  # Maxwell-like channel count
+
+        # Map neurons to channels (many neurons per channel)
+        channel_map = np.arange(num_neurons) % num_unique_channels
+        metadata = {"channel_map": channel_map.tolist()}
+
+        # Create spike trains
+        train = [
+            [i * 0.1 + j * 0.01 for j in range(10)] for i in range(num_neurons)
+        ]
+        sd = SpikeData(train, length=100, metadata=metadata)
+
+        # Test sparse output - should be memory efficient
+        sparse_raster = sd.channel_raster(
+            bin_size=1.0,
+            sparse_output=True,
+            expected_num_channels=num_expected_channels,
+        )
+        self.assertTrue(sparse.issparse(sparse_raster))
+        self.assertEqual(sparse_raster.shape[0], num_expected_channels)
+        # Should only store non-zero values (first 100 channels have data)
+        self.assertGreater(sparse_raster[:num_unique_channels].sum(), 0)
+        self.assertEqual(sparse_raster[num_unique_channels:].sum(), 0)
+
+        # Test that converting to dense works (but may be memory intensive)
+        # Only test with smaller expected_num_channels to avoid memory issues
+        dense_raster_small = sd.channel_raster(
+            bin_size=1.0,
+            sparse_output=False,
+            expected_num_channels=200,  # Smaller for testing
+        )
+        self.assertEqual(dense_raster_small.shape[0], 200)
+        self.assertAll(dense_raster_small[num_unique_channels:] == 0)

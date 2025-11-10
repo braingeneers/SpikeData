@@ -717,22 +717,22 @@ class SpikeData:
             if current_channels < expected_num_channels:
                 # Pad with zeros
                 if sparse.issparse(channel_raster):
-                    # Convert to dense, pad, then convert back
-                    channel_raster_dense = channel_raster.toarray()
-                    padding_shape = (
-                        expected_num_channels - current_channels,
-                        channel_raster_dense.shape[1],
+                    # Use sparse operations to avoid memory-intensive dense conversion
+                    # Create a sparse padding matrix (all zeros, so very memory efficient)
+                    n_bins = channel_raster.shape[1]
+                    padding_channels = expected_num_channels - current_channels
+                    # Create empty sparse matrix for padding (no data stored since all zeros)
+                    padding = sparse.csr_array(
+                        (padding_channels, n_bins), dtype=channel_raster.dtype
                     )
-                    padding = np.zeros(padding_shape, dtype=channel_raster_dense.dtype)
-                    channel_raster_dense = np.concatenate(
-                        [channel_raster_dense, padding], axis=0
-                    )
-                    channel_raster = (
-                        sparse.csr_array(channel_raster_dense)
-                        if sparse_output
-                        else channel_raster_dense
-                    )
+                    # Vertically stack the original raster with padding
+                    # Use vstack to combine sparse matrices efficiently
+                    channel_raster = sparse.vstack([channel_raster, padding])
+                    # Convert to dense only if sparse_output is False
+                    if not sparse_output:
+                        channel_raster = channel_raster.toarray()
                 else:
+                    # Dense case: pad with zeros
                     padding_shape = (
                         expected_num_channels - current_channels,
                         channel_raster.shape[1],
