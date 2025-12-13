@@ -660,85 +660,57 @@ class SpikeData:
         n_channels = len(unique_channels)
         channel_to_idx = {ch: idx for idx, ch in enumerate(unique_channels)}
 
-        # Get neuron-level raster
+        # Get neuron-level raster (always sparse)
         neuron_raster = self.sparse_raster(bin_size)
 
         # Aggregate by channel
-        if sparse.issparse(neuron_raster):
-            # Convert to COO format for easier manipulation
-            neuron_raster_coo = neuron_raster.tocoo()
-            # Map neuron indices to channel indices
-            channel_indices = np.array(
-                [
-                    channel_to_idx.get(channel_map[neuron_idx], -1)
-                    for neuron_idx in neuron_raster_coo.row
-                ]
-            )
-            # Filter out invalid channels
-            valid_mask = channel_indices >= 0
-            channel_indices = channel_indices[valid_mask]
-            time_indices = neuron_raster_coo.col[valid_mask]
-            values = neuron_raster_coo.data[valid_mask]
+        # Convert to COO format for easier manipulation
+        neuron_raster_coo = neuron_raster.tocoo()
+        # Map neuron indices to channel indices
+        channel_indices = np.array(
+            [
+                channel_to_idx.get(channel_map[neuron_idx], -1)
+                for neuron_idx in neuron_raster_coo.row
+            ]
+        )
+        # Filter out invalid channels
+        valid_mask = channel_indices >= 0
+        channel_indices = channel_indices[valid_mask]
+        time_indices = neuron_raster_coo.col[valid_mask]
+        values = neuron_raster_coo.data[valid_mask]
 
-            # Aggregate spikes for the same (channel, time) pair
-            n_bins = neuron_raster.shape[1]
-            if binary:
-                # Binary mask: just mark presence
-                # Use a temporary dense array to aggregate, then convert to sparse
-                temp_dense = np.zeros((n_channels, n_bins), dtype=int)
-                for ch_idx, t_idx in zip(channel_indices, time_indices):
-                    temp_dense[ch_idx, t_idx] = 1
-                channel_raster = sparse.csr_array(temp_dense)
-            else:
-                # Count spikes - need to sum values for same (channel, time) pairs
-                # Use a temporary dense array to aggregate properly
-                temp_dense = np.zeros((n_channels, n_bins), dtype=float)
-                for ch_idx, t_idx, val in zip(channel_indices, time_indices, values):
-                    temp_dense[ch_idx, t_idx] += val
-                channel_raster = sparse.csr_array(temp_dense)
+        # Aggregate spikes for the same (channel, time) pair
+        n_bins = neuron_raster.shape[1]
+        if binary:
+            # Binary mask: just mark presence
+            # Use a temporary dense array to aggregate, then convert to sparse
+            temp_dense = np.zeros((n_channels, n_bins), dtype=int)
+            for ch_idx, t_idx in zip(channel_indices, time_indices):
+                temp_dense[ch_idx, t_idx] = 1
+            channel_raster = sparse.csr_array(temp_dense)
         else:
-            # Dense case
-            n_bins = neuron_raster.shape[1]
-            channel_raster = np.zeros((n_channels, n_bins), dtype=int)
-            for neuron_idx in range(self.N):
-                channel_idx = channel_to_idx.get(channel_map[neuron_idx], -1)
-                if channel_idx >= 0:
-                    if binary:
-                        channel_raster[channel_idx] = (
-                            channel_raster[channel_idx]
-                            | (neuron_raster[neuron_idx] > 0)
-                        ).astype(int)
-                    else:
-                        channel_raster[channel_idx] += neuron_raster[neuron_idx]
+            # Count spikes - need to sum values for same (channel, time) pairs
+            # Use a temporary dense array to aggregate properly
+            temp_dense = np.zeros((n_channels, n_bins), dtype=float)
+            for ch_idx, t_idx, val in zip(channel_indices, time_indices, values):
+                temp_dense[ch_idx, t_idx] += val
+            channel_raster = sparse.csr_array(temp_dense)
 
         # Handle expected_num_channels: pad or trim to match
         if expected_num_channels is not None:
             current_channels = channel_raster.shape[0]
             if current_channels < expected_num_channels:
                 # Pad with zeros
+                # Since we already create a dense temp array during aggregation,
+                # we can work with the dense representation directly
                 if sparse.issparse(channel_raster):
-                    # Use sparse operations to avoid memory-intensive dense conversion
-                    # Create a sparse padding matrix (all zeros, so very memory efficient)
-                    n_bins = channel_raster.shape[1]
-                    padding_channels = expected_num_channels - current_channels
-                    # Create empty sparse matrix for padding (no data stored since all zeros)
-                    padding = sparse.csr_array(
-                        (padding_channels, n_bins), dtype=channel_raster.dtype
-                    )
-                    # Vertically stack the original raster with padding
-                    # Use vstack to combine sparse matrices efficiently
-                    channel_raster = sparse.vstack([channel_raster, padding])
-                    # Convert to dense only if sparse_output is False
-                    if not sparse_output:
-                        channel_raster = channel_raster.toarray()
-                else:
-                    # Dense case: pad with zeros
-                    padding_shape = (
-                        expected_num_channels - current_channels,
-                        channel_raster.shape[1],
-                    )
-                    padding = np.zeros(padding_shape, dtype=channel_raster.dtype)
-                    channel_raster = np.concatenate([channel_raster, padding], axis=0)
+                    channel_raster = channel_raster.toarray()
+                padding_shape = (
+                    expected_num_channels - current_channels,
+                    channel_raster.shape[1],
+                )
+                padding = np.zeros(padding_shape, dtype=channel_raster.dtype)
+                channel_raster = np.concatenate([channel_raster, padding], axis=0)
             elif current_channels > expected_num_channels:
                 # Trim excess channels
                 if sparse.issparse(channel_raster):
@@ -1666,8 +1638,7 @@ def butter_filter(
         if lowcut >= highcut:
             raise ValueError("lowcut must be smaller than highcut")
         filter_type = "bandpass"
-        band = [lowcut, highcut]
-        Wn = [e / fs * 2 for e in band]
+        Wn = [lowcut / fs * 2, highcut / fs * 2]
 
     filter_coeff = signal.iirfilter(
         order, Wn, analog=False, btype=filter_type, output="sos"
