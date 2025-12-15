@@ -22,6 +22,9 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering",
   "Typing :: Typed",
 ]
@@ -44,7 +47,6 @@ dev = [
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "scipy-stubs>=1.15.2.2",
-    "spikedata[all]",
 ]
 
 [tool.basedpyright]
